@@ -1,0 +1,12 @@
+{
+  "installation_dir": "C:\\ProgramData\\miholess",
+  "mihomo_core_mirror": "https://github.com/MetaCubeX/mihomo/releases/download/",
+  "geoip_url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat",
+  "geosite_url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
+  "mmdb_url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
+  "remote_config_url": "https://example.com/your-single-remote-config.yaml",
+  "local_config_path": "%USERPROFILE%\\miholess_local_configs",
+  "log_file": "C:\\ProgramData\\miholess\\mihomo.log",
+  "pid_file": "C:\\ProgramData\\miholess\\mihomo.pid",
+  "mihomo_port": "7890"
+}
