@@ -48,7 +48,7 @@ function Get-LatestMihomoDownloadUrl {
         Write-Log "Error fetching release info from GitHub API: $errorMessage" "ERROR"
         return $null
     }
-    Write-Log "DEBUG: API call successful for releases." # NEW DEBUG LOG
+    Write-Log "DEBUG: API call successful for releases."
 
     $tagName = $releaseInfo.tag_name
     if (-not $tagName) {
@@ -61,9 +61,9 @@ function Get-LatestMihomoDownloadUrl {
         Write-Log "No assets found for the latest release." "ERROR"
         return $null
     }
-    Write-Log "DEBUG: Found $($assets.Count) assets." # NEW DEBUG LOG
+    Write-Log "DEBUG: Found $($assets.Count) assets."
 
-    $osArchPattern = "mihomo-$OsType-$Arch"
+    $osArchPattern = "mihomo-${OsType}-${Arch}" # Use curly braces for clarity, though not strictly needed here
     $candidateUrls = @() # Array to hold potential candidate URLs
 
     foreach ($asset in $assets) {
@@ -84,11 +84,12 @@ function Get-LatestMihomoDownloadUrl {
             continue
         }
         
-        Write-Log "DEBUG: Candidate - Asset: $assetName, URL: $downloadUrl" # NEW DEBUG LOG
+        Write-Log "DEBUG: Candidate - Asset: ${assetName}, URL: ${downloadUrl}" # Use curly braces for clarity
 
         # Prioritize 'compatible' versions by adding them to the beginning
         if ($assetName -match 'compatible') {
-            $candidateUrls = $downloadUrl + $candidateUrls # Prepend
+            # FIX: Ensure array concatenation when prepending
+            $candidateUrls = @($downloadUrl) + $candidateUrls 
         } else {
             $candidateUrls += $downloadUrl # Append
         }
@@ -98,9 +99,9 @@ function Get-LatestMihomoDownloadUrl {
         Write-Log "No suitable Mihomo binary found for ${OsType}-${Arch} (excluding Go versions: ${ExcludeGoVersions})." "ERROR"
         return $null
     }
-    Write-Log "DEBUG: Found $($candidateUrls.Count) candidate URLs. First candidate: $($candidateUrls[0])" # NEW DEBUG LOG
+    Write-Log "DEBUG: Found $($candidateUrls.Count) candidate URLs. First candidate: $($candidateUrls[0])"
 
-    $finalUrl = $candidateUrls[0]
+    $finalUrl = $candidateUrls[0] # Get the highest priority URL
 
     # If a custom mirror is provided, replace the base GitHub URL
     if ($BaseMirror -ne "https://github.com/MetaCubeX/mihomo/releases/download/" -and $finalUrl -match "github.com/MetaCubeX/mihomo/releases/download/") {
@@ -109,7 +110,7 @@ function Get-LatestMihomoDownloadUrl {
         Write-Log "Using custom mirror: ${BaseMirror}"
     }
     
-    Write-Log "DEBUG: Final URL before return: $finalUrl" # NEW DEBUG LOG
+    Write-Log "DEBUG: Final URL before return: $finalUrl"
     return $finalUrl
 }
 
