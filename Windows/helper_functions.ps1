@@ -194,12 +194,12 @@ function Download-MihomoDataFiles {
         $url = $dataFiles[$fileName]
         $destination = Join-Path $InstallationDir $fileName
         try {
-            Write-Log "Downloading $fileName from $url"
+            Write-Log "Downloading ${fileName} from $url" # <-- FIX HERE
             Invoke-WebRequest -Uri $url -OutFile $destination -ErrorAction Stop
         } catch {
             # Store exception message in a variable to avoid parsing issues
             $errorMessage = $_.Exception.Message
-            Write-Log "Failed to download $fileName: $errorMessage" "WARN"
+            Write-Log "Failed to download ${fileName}: $errorMessage" "WARN" # <-- FIX HERE
             $success = $false
         }
     }
@@ -252,7 +252,11 @@ function Update-MihomoMainConfig {
     }
 
     $targetConfigFilePath = Join-Path $LocalConfigPath "config.yaml"
-    Write-Log "Downloading remote config from: $RemoteConfigUrl to $targetConfigFilePath"
+    Write-Log "Downloading remote config from: ${RemoteConfigUrl} to ${targetConfigFilePath}" # <-- FIX HERE
+    # Also fixed a previous line here
+    # Write-Log "Downloading remote config from: $RemoteConfigUrl to $targetConfigFilePath"
+    # Should be: Write-Log "Downloading remote config from: ${RemoteConfigUrl} to ${targetConfigFilePath}"
+
 
     $newConfigContent = $null
     try {
@@ -260,7 +264,7 @@ function Update-MihomoMainConfig {
     } catch {
         # Store exception message in a variable to avoid parsing issues
         $errorMessage = $_.Exception.Message
-        Write-Log "Failed to download remote config from $RemoteConfigUrl: $errorMessage" "ERROR"
+        Write-Log "Failed to download remote config from ${RemoteConfigUrl}: $errorMessage" "ERROR" # <-- FIX HERE
         return $false
     }
 
@@ -276,7 +280,7 @@ function Update-MihomoMainConfig {
         } catch {
             # Store exception message in a variable to avoid parsing issues
             $errorMessage = $_.Exception.Message
-            Write-Log "Failed to read existing config at $targetConfigFilePath: $errorMessage" "WARN"
+            Write-Log "Failed to read existing config at ${targetConfigFilePath}: $errorMessage" "WARN" # <-- FIX HERE
         }
     }
 
