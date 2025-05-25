@@ -4,47 +4,38 @@
 $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 . (Join-Path $PSScriptRoot "helper_functions.ps1")
 
-# --- Configuration Variables (Defaults, can be overridden by parameters) ---
-$MiholessInstallDir = "C:\ProgramData\miholess" # Default installation directory
-$MiholessServiceAccount = "NT AUTHORITY\System" # Service runs as System by default
-$DefaultConfig = @{
-    installation_dir = $MiholessInstallDir
-    mihomo_core_mirror = "https://github.com/MetaCubeX/mihomo/releases/download/" # Default GitHub releases URL
-    geoip_url = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
-    geosite_url = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
-    mmdb_url = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
-    remote_config_url = "" # Single remote config URL, empty by default
-    local_config_path = "%USERPROFILE%\\miholess_local_configs" # Changed to single path (string)
-    log_file = "$MiholessInstallDir\mihomo.log"
-    pid_file = "$MiholessInstallDir\mihomo.pid"
-    mihomo_port = "7890" # Default port
-}
-
-# --- Parameters for script execution ---
+# --- Parameters for script execution (with literal defaults) ---
+# These parameters now define their own default values directly.
 Param(
-    [string]$InstallDir = $MiholessInstallDir,
-    [string]$CoreMirror = $DefaultConfig.mihomo_core_mirror,
-    [string]$GeoIpUrl = $DefaultConfig.geoip_url,
-    [string]$GeoSiteUrl = $DefaultConfig.geosite_url,
-    [string]$MmdbUrl = $DefaultConfig.mmdb_url,
-    [string]$RemoteConfigUrl = $DefaultConfig.remote_config_url,
-    [string]$LocalConfigPath = $DefaultConfig.local_config_path, # Changed to single string
-    [string]$MihomoPort = $DefaultConfig.mihomo_port,
-    [switch]$Force # To force re-installation/overwrite
+    [string]$InstallDir = "C:\ProgramData\miholess",
+    [string]$CoreMirror = "https://github.com/MetaCubeX/mihomo/releases/download/",
+    [string]$GeoIpUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat",
+    [string]$GeoSiteUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
+    [string]$MmdbUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
+    [string]$RemoteConfigUrl = "",
+    [string]$LocalConfigPath = "%USERPROFILE%\\miholess_local_configs",
+    [string]$MihomoPort = "7890",
+    [switch]$Force
 )
 
-# --- Update global config with parameters ---
+# --- Configuration Variables (Populated from parameters) ---
+# These variables now get their values from the parameters defined above.
+# If no parameters are passed, they will use the literal defaults from the Param block.
 $MiholessInstallDir = $InstallDir
-$DefaultConfig.installation_dir = $InstallDir
-$DefaultConfig.mihomo_core_mirror = $CoreMirror
-$DefaultConfig.geoip_url = $GeoIpUrl
-$DefaultConfig.geosite_url = $GeoSiteUrl
-$DefaultConfig.mmdb_url = $MmdbUrl
-$DefaultConfig.remote_config_url = $RemoteConfigUrl
-$DefaultConfig.local_config_path = $LocalConfigPath # Changed
-$DefaultConfig.mihomo_port = $MihomoPort
-$DefaultConfig.log_file = "$MiholessInstallDir\mihomo.log"
-$DefaultConfig.pid_file = "$MiholessInstallDir\mihomo.pid"
+$MiholessServiceAccount = "NT AUTHORITY\System" # This remains a constant
+
+$DefaultConfig = @{
+    installation_dir = $InstallDir
+    mihomo_core_mirror = $CoreMirror
+    geoip_url = $GeoIpUrl
+    geosite_url = $GeoSiteUrl
+    mmdb_url = $MmdbUrl
+    remote_config_url = $RemoteConfigUrl
+    local_config_path = $LocalConfigPath
+    log_file = (Join-Path $InstallDir "mihomo.log") # Use $InstallDir here directly
+    pid_file = (Join-Path $InstallDir "mihomo.pid")   # Use $InstallDir here directly
+    mihomo_port = $MihomoPort
+}
 
 # --- Main Installation Logic ---
 Write-Log "Starting Miholess installation..."

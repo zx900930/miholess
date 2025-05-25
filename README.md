@@ -1,9 +1,9 @@
 # miholess
 
 ```
- __    __  __  __  __  ______  __      ______  ______  ______   
-/\ "-./  \/\ \/\ \_\ \/\  __ \/\ \    /\  ___\/\  ___\/\  ___\  
-\ \ \-./\ \ \ \ \  __ \ \ \/\ \ \ \___\ \  __\\ \___  \ \___  \ 
+ __    __  __  __  __  ______  __      ______  ______  ______
+/\ "-./  \/\ \/\ \_\ \/\  __ \/\ \    /\  ___\/\  ___\/\  ___\
+\ \ \-./\ \ \ \ \  __ \ \ \/\ \ \ \___\ \  __\\ \___  \ \___  \
  \ \_\ \ \_\ \_\ \_\ \_\ \_____\ \_____\ \_____\/\_____\/\_____\
   \/_/  \/_/\/_/\/_/\/_/\/_____/\/_____/\/_____/\/_____/\/_____/
 ```
@@ -67,7 +67,7 @@ The `install.ps1` script is designed to be executed directly from a URL using `I
 Open **PowerShell as Administrator** and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1'))
 ```
 
 **Using a custom mirror or specific configuration (PowerShell as Administrator):**
@@ -76,11 +76,8 @@ You can pass parameters directly to the installation script to customize setting
 
 ```powershell
 # Example: Install to a custom directory and use a custom GitHub mirror
-irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex `
-    -InstallDir "C:\MihomoAuto" `
-    -CoreMirror "https://ghfast.top/https://github.com/MetaCubeX/mihomo/releases/download/" `
-    -RemoteConfigUrl "https://myconfig.com/my-super-config.yaml" `
-    -LocalConfigPath "$env:USERPROFILE\MyMihomoConfigs"
+Set-ExecutionPolicy Bypass -Scope Process -Force
+C:\temp\install.ps1 -InstallDir "C:\MihomoAuto" -CoreMirror "https://ghfast.top/https://github.com/MetaCubeX/mihomo/releases/download/" -RemoteConfigUrl "https://myconfig.com/my-super-config.yaml" -LocalConfigPath "$env:USERPROFILE\MyMihomoConfigs"
 
 # Example: Force re-installation (if miholess is already installed)
 irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex -Force
