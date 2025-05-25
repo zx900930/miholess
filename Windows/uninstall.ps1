@@ -74,10 +74,17 @@ $taskNames = @(
 foreach ($taskName in $taskNames) {
     Write-Log "Attempting to unregister scheduled task '${taskName}' using schtasks.exe..."
     try {
-        $taskQuery = (schtasks.exe /query /TN `"${taskName}`" /FO LIST 2>&1)
-        if ($LASTEXITCODE -eq 0) { # Task exists
-            $result = (schtasks.exe /delete /TN `"${taskName}`" /F 2>&1)
-            if ($LASTEXITCODE -eq 0) {
+        # Check if task exists first
+        $taskQueryArgs = @("/query", "/TN", "`"${taskName}`"", "/FO", "LIST")
+        $taskQueryResult = (& schtasks.exe $taskQueryArgs 2>&1)
+        
+        if ($LASTEXITCODE -eq 0 -and $taskQueryResult -match "TaskName") { # Task exists
+            Write-Log "Scheduled task '${taskName}' found. Deleting..." "WARN"
+            # Use proper argument array for schtasks.exe /delete
+            $deleteArgs = @("/delete", "/TN", "`"${taskName}`"", "/F")
+            $result = (& schtasks.exe $deleteArgs 2>&1)
+            
+            if ($LASTEXITCODE -eq 0 -and $result -match "SUCCESS") {
                 Write-Log "Scheduled task '${taskName}' unregistered successfully using schtasks.exe."
             } else {
                 throw "schtasks.exe /delete command failed: $result"

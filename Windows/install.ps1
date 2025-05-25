@@ -305,8 +305,8 @@ try {
 # 7. Create Scheduled Tasks
 Write-Log "Creating scheduled tasks..."
 
-# Function to safely register a scheduled task (local to install.ps1 as it's not in helper_functions yet)
-# This function is now fully self-contained using schtasks.exe
+# Function to safely register a scheduled task (local to install.ps1)
+# Now uses schtasks.exe command line with proper argument passing
 function Register-MiholessScheduledTask {
     Param(
         [string]$TaskName,
@@ -321,8 +321,9 @@ function Register-MiholessScheduledTask {
     # Check if task exists and remove if so
     try {
         $taskQuery = (schtasks.exe /query /TN `"${TaskName}`" /FO LIST 2>&1)
-        if ($LASTEXITCODE -eq 0) {
+        if ($LASTEXITCODE -eq 0) { # Task exists
             Write-Log "Scheduled task '${TaskName}' already exists. Deleting old task." "WARN"
+            # Use separate args for schtasks.exe /delete
             (schtasks.exe /delete /TN `"${TaskName}`" /F 2>&1) | Out-Null
             Start-Sleep -Seconds 1 # Give it a moment to clear
         }
@@ -335,31 +336,38 @@ function Register-MiholessScheduledTask {
     $taskAction = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$scriptPathLocal`""
     
     try {
-        $scheduleArgs = ""
+        # Build argument list for schtasks.exe /create
+        $schtasksArgs = @(
+            "/create",
+            "/TN", "${TaskName}",
+            "/TR", "`"$taskAction`"" # Action wrapped in double quotes for schtasks.exe
+        )
+
         switch ($ScheduleType) {
             "DAILY" {
-                $scheduleArgs = "/SC DAILY /ST ${ScheduleTime}"
+                $schtasksArgs += "/SC", "DAILY", "/ST", "${ScheduleTime}"
             }
             "HOURLY" {
-                # For hourly, schtasks supports /SC HOURLY or /SC MINUTE with /MO (Modifier)
-                # To run every hour starting at a specific time: /SC HOURLY /ST 00:00
-                $scheduleArgs = "/SC HOURLY /ST ${ScheduleTime}"
+                # schtasks.exe /SC HOURLY works without /MO and implies every hour
+                # Combined with /ST, it means every hour starting at ST.
+                $schtasksArgs += "/SC", "HOURLY", "/ST", "${ScheduleTime}"
             }
             default {
                 Write-Log "Unsupported schedule type: ${ScheduleType}" "ERROR"
                 return $false
             }
         }
+        
+        # Add common settings. /IT is needed for interactive tasks, /RL HIGHEST for admin context.
+        # /F for force, /RU SYSTEM for System account.
+        $schtasksArgs += "/RL", "HIGHEST"
+        $schtasksArgs += "/IT" # Run only when user is logged on and allows interaction
+        $schtasksArgs += "/F"
+        $schtasksArgs += "/RU", "SYSTEM" # Run as System account
 
-        # Construct the schtasks command
-        $schtasksCommand = "schtasks.exe /create /TN `"${TaskName}`" /TR `"$taskAction`" ${scheduleArgs} /RL HIGHEST /IT /F /RU SYSTEM"
-        # /RL HIGHEST: Run with highest privileges
-        # /IT: Run only when user is logged on (or interact with user, needed for some contexts)
-        # /F: Force creation
-        # /RU SYSTEM: Run as System account
-
-        Write-Log "Executing schtasks command: $schtasksCommand" "DEBUG"
-        $result = (& schtasks.exe /create /TN `"${TaskName}`" /TR `"$taskAction`" ${scheduleArgs} /RL HIGHEST /IT /F /RU SYSTEM 2>&1)
+        # Execute schtasks.exe with the argument array
+        Write-Log "Executing schtasks command: schtasks.exe $($schtasksArgs -join ' ')" "DEBUG"
+        $result = (& schtasks.exe $schtasksArgs 2>&1)
         
         if ($LASTEXITCODE -eq 0 -and $result -match "SUCCESS") {
             Write-Log "Scheduled task '${TaskName}' registered successfully using schtasks.exe."
@@ -374,15 +382,17 @@ function Register-MiholessScheduledTask {
     }
 }
 
-# Task: Mihomo Core Updater
 $taskNameCore = "Miholess_Core_Updater"
 $scriptCorePath = "${global:MiholessInstallDirJson}/miholess_core_updater.ps1"
+$triggerCore = New-ScheduledTaskTrigger -Daily -At "03:00" # Dummy trigger var, not used directly by schtasks
+
 Register-MiholessScheduledTask -TaskName $taskNameCore -Description "Updates Mihomo core to the latest non-Go version." `
     -ScriptPath $scriptCorePath -ScheduleType "DAILY" -ScheduleTime "03:00"
 
-# Task: Mihomo Config Updater
 $taskNameConfig = "Miholess_Config_Updater"
 $scriptConfigPath = "${global:MiholessInstallDirJson}/miholess_config_updater.ps1"
+$triggerConfig = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 1) -At "00:00" # Dummy trigger var
+
 Register-MiholessScheduledTask -TaskName $taskNameConfig -Description "Updates Mihomo remote and local configurations." `
     -ScriptPath $scriptConfigPath -ScheduleType "HOURLY" -ScheduleTime "00:00" # Runs hourly starting at midnight
 
