@@ -223,11 +223,13 @@ function Download-AndExtractMihomo {
 
 function Download-MihomoDataFiles {
     Param(
-        [string]$DestinationDir, # This param now explicitly means the target dir for data files
-        [string]$GeoIpUrl,
-        [string]$GeoSiteUrl,
-        [string]$MmdbUrl
+        [string]$DestinationDir # This param now explicitly means the target dir for data files (Native path)
     )
+    # FIX: Check if DestinationDir is actually provided and valid.
+    if ([string]::IsNullOrEmpty($DestinationDir)) {
+        Write-Log "Error: Destination directory for data files is empty or null. Cannot download data files." "ERROR"
+        return $false
+    }
     Write-Log "Downloading data files to ${DestinationDir}..."
     # Ensure the destination directory exists before downloading
     if (-not (Test-Path -Path $DestinationDir)) {
@@ -249,6 +251,11 @@ function Download-MihomoDataFiles {
     $success = $true
     foreach ($fileName in $dataFiles.Keys) {
         $url = $dataFiles[$fileName]
+        # FIX: Ensure $url is not null/empty before trying to download (if GeoIpUrl etc. were empty inputs)
+        if ([string]::IsNullOrEmpty($url)) {
+            Write-Log "Warning: URL for ${fileName} is empty. Skipping download." "WARN"
+            continue
+        }
         $destination = Join-Path $DestinationDir $fileName # Native path
         try {
             Write-Log "Downloading ${fileName} from $url"
@@ -273,7 +280,7 @@ function Invoke-MiholessServiceCommand {
         [string]$StartupType = "auto" # "auto", "demand", "disabled" for create command
     )
 
-    Write-Log "Attempting service '${Command}' for '${ServiceName}'..." # Using ${} here for safety
+    Write-Log "Attempting service '${Command}' for '${ServiceName}'..."
 
     # Check for cmdlet availability
     $cmdletAvailable = $false
@@ -300,9 +307,8 @@ function Invoke-MiholessServiceCommand {
                 "remove" {
                     Remove-Service -Name $ServiceName -ErrorAction Stop
                     Write-Log "Service '${ServiceName}' deleted using cmdlet. Waiting for full removal..."
-                    # --- FIX: Poll until service is truly gone ---
-                    $maxWaitSeconds = 30 # Max wait time for service to disappear
-                    $intervalSeconds = 2 # Check every 2 seconds
+                    $maxWaitSeconds = 30
+                    $intervalSeconds = 2
                     $waitedSeconds = 0
                     do {
                         Start-Sleep -Seconds $intervalSeconds
@@ -320,7 +326,6 @@ function Invoke-MiholessServiceCommand {
                         Write-Log "Service '${ServiceName}' still detected after ${maxWaitSeconds}s timeout. Manual reboot might be required." "ERROR"
                         return $false
                     }
-                    # --- END FIX ---
                 }
                 "create" {
                     New-Service -Name $ServiceName -DisplayName $DisplayName -Description $Description `
@@ -338,7 +343,6 @@ function Invoke-MiholessServiceCommand {
         } catch {
             $errorMessage = $_.Exception.Message
             Write-Log "Cmdlet for service '${Command}' failed for '${ServiceName}': $errorMessage. Falling back to sc.exe." "WARN"
-            # Fall through to sc.exe block
         }
     } else {
         Write-Log "Cmdlet for service '${Command}' not found. Falling back to sc.exe." "WARN"
@@ -349,7 +353,7 @@ function Invoke-MiholessServiceCommand {
         switch ($Command) {
             "query" {
                 $scResult = (sc.exe query `"$ServiceName`" 2>&1)
-                return ($LASTEXITCODE -eq 0 -and $scResult -match "STATE") # Check if query successful and contains state
+                return ($LASTEXITCODE -eq 0 -and $scResult -match "STATE")
             }
             "stop" {
                 $scResult = (sc.exe stop `"$ServiceName`" 2>&1)
@@ -364,15 +368,13 @@ function Invoke-MiholessServiceCommand {
                 $scResult = (sc.exe delete `"$ServiceName`" 2>&1)
                 if ($LASTEXITCODE -eq 0) {
                     Write-Log "Service '${ServiceName}' deleted using sc.exe. Waiting for full removal..."
-                    # --- FIX: Poll until service is truly gone using sc.exe query ---
-                    $maxWaitSeconds = 30 # Max wait time for service to disappear
-                    $intervalSeconds = 2 # Check every 2 seconds
+                    $maxWaitSeconds = 30
+                    $intervalSeconds = 2
                     $waitedSeconds = 0
                     do {
                         Start-Sleep -Seconds $intervalSeconds
                         $waitedSeconds += $intervalSeconds
                         $scQueryOutput = (sc.exe query `"$ServiceName`" 2>&1)
-                        # Service exists if query successful and contains STATE (not ERROR 1060: The specified service does not exist)
                         $serviceExists = ($LASTEXITCODE -eq 0 -and $scQueryOutput -match "STATE") 
                         if ($serviceExists) {
                             Write-Log "Service '${ServiceName}' still detected via sc.exe. Waited ${waitedSeconds}s..." "DEBUG"
@@ -386,7 +388,6 @@ function Invoke-MiholessServiceCommand {
                         Write-Log "Service '${ServiceName}' still detected via sc.exe after ${maxWaitSeconds}s timeout. Manual reboot might be required." "ERROR"
                         return $false
                     }
-                    # --- END FIX ---
                 } else {
                     throw "sc.exe delete command failed: $scResult"
                 }

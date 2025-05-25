@@ -98,6 +98,11 @@ if ([string]::IsNullOrEmpty($LocalConfigPathInput)) { $LocalConfigPathInput = $D
 # Store forward-slashed path for JSON/config, and native path for file system operations
 $global:MiholessLocalConfigPathJson = ([System.Environment]::ExpandEnvironmentVariables($LocalConfigPathInput)).Replace('\', '/')
 $global:MiholessLocalConfigPathNative = $global:MiholessLocalConfigPathJson.Replace('/', '\')
+# FIX: Ensure LocalConfigPathNative is not empty. If it becomes empty after expansion/replace, set a fallback.
+if ([string]::IsNullOrEmpty($global:MiholessLocalConfigPathNative)) {
+    $global:MiholessLocalConfigPathNative = ([System.Environment]::ExpandEnvironmentVariables($Default_LocalConfigPath)).Replace('\', '\')
+    Write-Log "Local Config Path was empty after expansion, set to default: ${global:MiholessLocalConfigPathNative}" "WARN"
+}
 Write-Log "Local Config Path: ${global:MiholessLocalConfigPathNative}" # Log native path
 
 # 8. Get Mihomo Port
@@ -173,8 +178,12 @@ if (-not (Download-AndExtractMihomo -DownloadUrl $mihomoDownloadUrl -Destination
 
 # 4. Download GeoIP, GeoSite, MMDB files
 # IMPORTANT FIX: Download to the Mihomo data directory ($global:MiholessLocalConfigPathNative)
-# not the installation directory.
-if (-not (Download-MihomoDataFiles -InstallationDir $global:MiholessLocalConfigPathNative -GeoIpUrl $GeoIpUrl -GeoSiteUrl $GeoSiteUrl -MmdbUrl $MmdbUrl)) {
+# not the installation directory. Ensure it's not null.
+if ([string]::IsNullOrEmpty($global:MiholessLocalConfigPathNative)) {
+    Write-Log "Error: Local config path is empty. Cannot download geodata files." "ERROR"
+    exit 1 # Critical failure, cannot proceed without a valid local config path
+}
+if (-not (Download-MihomoDataFiles -DestinationDir $global:MiholessLocalConfigPathNative -GeoIpUrl $GeoIpUrl -GeoSiteUrl $GeoSiteUrl -MmdbUrl $MmdbUrl)) {
     Write-Log "Some data files failed to download. Check logs for details." "WARN"
 }
 
@@ -292,13 +301,14 @@ $commonSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -StopIfGoingO
 
 # Task: Mihomo Core Updater
 # Path for scheduled task uses forward slashes, will be converted by Register-MiholessScheduledTask
-$taskNameCore = "${global:MiholessInstallDirJson}/miholess_core_updater.ps1"
+$taskNameCore = "Miholess_Core_Updater" # Define variable
+$scriptCorePath = "${global:MiholessInstallDirJson}/miholess_core_updater.ps1"
 Register-MiholessScheduledTask -TaskName $taskNameCore -Description "Updates Mihomo core to the latest non-Go version." `
-    -ScriptPath $taskNameCore -Triggers $triggerCore -Settings $commonSettings
+    -ScriptPath $scriptCorePath -Triggers $triggerCore -Settings $commonSettings
 
 # Task: Mihomo Config Updater
 # Path for scheduled task uses forward slashes, will be converted by Register-MiholessScheduledTask
-$taskNameConfig = "Miholess_Config_Updater"
+$taskNameConfig = "Miholess_Config_Updater" # Define variable
 $scriptConfigPath = "${global:MiholessInstallDirJson}/miholess_config_updater.ps1"
 # Run every hour starting at midnight, duration 1 day (meaning it will run for 24 hours, then then repeat daily)
 $triggerConfig = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 1) -At "00:00" 
