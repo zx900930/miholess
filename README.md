@@ -67,24 +67,14 @@ The `install.ps1` script is designed to be executed directly from a URL using `I
 Open **PowerShell as Administrator** and run:
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; `
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; `
-$tempPath = [System.IO.Path]::GetTempFileName() + ".ps1"; `
-(New-Object System.Net.WebClient).DownloadFile('https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1', $tempPath); `
-& $tempPath; `
-Remove-Item $tempPath -ErrorAction SilentlyContinue
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex
 ```
-
-_(Note: The backticks `` ` `` at the end of lines are for multi-line commands in PowerShell and can be removed if pasted as a single line.)_
 
 **Explanation of the one-liner:**
 
 - `Set-ExecutionPolicy Bypass -Scope Process -Force`: This temporarily sets the PowerShell execution policy to `Bypass` for the current PowerShell session (process), allowing the script to run without security prompts. The `-Force` parameter suppresses the confirmation message.
 - `[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072`: This explicitly enables TLS 1.2 (value 3072) for web requests within the current session. This helps prevent issues when downloading files from HTTPS URLs, especially on older Windows versions.
-- `$tempPath = [System.IO.Path]::GetTempFileName() + ".ps1";`: Generates a unique temporary file name with a `.ps1` extension to store the downloaded script.
-- `(New-Object System.Net.WebClient).DownloadFile('...', $tempPath);`: Downloads the `install.ps1` script content from GitHub directly to the temporary file specified by `$tempPath`.
-- `& $tempPath;`: Executes the downloaded script file. This is the most reliable way to execute a PowerShell script interactively.
-- `Remove-Item $tempPath -ErrorAction SilentlyContinue`: Cleans up the temporary script file after the installation is complete.
+- `irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex`: This downloads the `install.ps1` script content directly from GitHub using `Invoke-RestMethod` (`irm`) and immediately executes it using `Invoke-Expression` (`iex`). The `install.ps1` script itself then handles downloading all other necessary components.
 
 **Interactive Setup Steps:**
 
