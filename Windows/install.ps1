@@ -4,27 +4,86 @@
 $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 . (Join-Path $PSScriptRoot "helper_functions.ps1")
 
-# --- Parameters for script execution (with literal defaults) ---
-# These parameters now define their own default values directly.
-Param(
-    [string]$InstallDir = "C:\ProgramData\miholess",
-    [string]$CoreMirror = "https://github.com/MetaCubeX/mihomo/releases/download/",
-    [string]$GeoIpUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat",
-    [string]$GeoSiteUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
-    [string]$MmdbUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
-    [string]$RemoteConfigUrl = "",
-    [string]$LocalConfigPath = "%USERPROFILE%\\miholess_local_configs",
-    [string]$MihomoPort = "7890",
-    [switch]$Force
-)
+# --- Default Configuration Values ---
+# These are the base defaults that will be used in Read-Host prompts
+$Default_InstallDir = "C:\ProgramData\miholess"
+$Default_CoreMirror = "https://github.com/MetaCubeX/mihomo/releases/download/"
+$Default_GeoIpUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
+$Default_GeoSiteUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
+$Default_MmdbUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
+$Default_RemoteConfigUrl = ""
+$Default_LocalConfigPath = "%USERPROFILE%\\miholess_local_configs"
+$Default_MihomoPort = "7890"
 
-# --- Configuration Variables (Populated from parameters) ---
-# These variables now get their values from the parameters defined above.
-# If no parameters are passed, they will use the literal defaults from the Param block.
-$MiholessInstallDir = $InstallDir
-$MiholessServiceAccount = "NT AUTHORITY\System" # This remains a constant
+# --- Main Installation Logic ---
+Write-Log "Starting Miholess interactive installation..."
 
-$DefaultConfig = @{
+# Check for Administrator privileges
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Log "This script must be run with Administrator privileges. Please restart PowerShell as Administrator." "ERROR"
+    exit 1
+}
+
+Write-Host "`n--- Miholess Configuration ---" -ForegroundColor Yellow
+Write-Host "Please provide values for the installation. Press Enter to use the default." -ForegroundColor Cyan
+
+# 1. Get Installation Directory
+$InstallDir = Read-Host "Enter installation directory (Default: $Default_InstallDir)"
+if ([string]::IsNullOrEmpty($InstallDir)) { $InstallDir = $Default_InstallDir }
+Write-Log "Installation Directory: $InstallDir"
+
+# 2. Get Mihomo Core Mirror
+$CoreMirror = Read-Host "Enter Mihomo core download mirror URL (Default: $Default_CoreMirror)"
+if ([string]::IsNullOrEmpty($CoreMirror)) { $CoreMirror = $Default_CoreMirror }
+Write-Log "Mihomo Core Mirror: $CoreMirror"
+
+# 3. Get GeoIP URL
+$GeoIpUrl = Read-Host "Enter GeoIP.dat download URL (Default: $Default_GeoIpUrl)"
+if ([string]::IsNullOrEmpty($GeoIpUrl)) { $GeoIpUrl = $Default_GeoIpUrl }
+Write-Log "GeoIP URL: $GeoIpUrl"
+
+# 4. Get GeoSite URL
+$GeoSiteUrl = Read-Host "Enter GeoSite.dat download URL (Default: $Default_GeoSiteUrl)"
+if ([string]::IsNullOrEmpty($GeoSiteUrl)) { $GeoSiteUrl = $Default_GeoSiteUrl }
+Write-Log "GeoSite URL: $GeoSiteUrl"
+
+# 5. Get MMDB URL
+$MmdbUrl = Read-Host "Enter Country.mmdb download URL (Default: $Default_MmdbUrl)"
+if ([string]::IsNullOrEmpty($MmdbUrl)) { $MmdbUrl = $Default_MmdbUrl }
+Write-Log "MMDB URL: $MmdbUrl"
+
+# 6. Get Remote Config URL
+$RemoteConfigUrl = Read-Host "Enter remote configuration URL (Leave empty to use local config.yaml. Default: <empty>)"
+if ([string]::IsNullOrEmpty($RemoteConfigUrl)) { $RemoteConfigUrl = $Default_RemoteConfigUrl }
+Write-Log "Remote Config URL: $RemoteConfigUrl"
+
+# 7. Get Local Config Path
+$LocalConfigPath = Read-Host "Enter local configuration folder path (e.g., %USERPROFILE%\my_configs. Default: $Default_LocalConfigPath)"
+if ([string]::IsNullOrEmpty($LocalConfigPath)) { $LocalConfigPath = $Default_LocalConfigPath }
+Write-Log "Local Config Path: $LocalConfigPath"
+
+# 8. Get Mihomo Port
+$MihomoPort = Read-Host "Enter Mihomo listen port (Default: $Default_MihomoPort)"
+if ([string]::IsNullOrEmpty($MihomoPort)) { $MihomoPort = $Default_MihomoPort }
+Write-Log "Mihomo Port: $MihomoPort"
+
+# 9. Force Re-installation
+$Force = Read-Host "Force re-installation if Miholess already exists? (Y/N, Default: N)"
+$Force = ($Force -eq 'Y' -or $Force -eq 'y')
+Write-Log "Force Re-installation: $Force"
+
+Write-Host "`n--- Installation Summary ---" -ForegroundColor Yellow
+Write-Host "Installation Directory: $InstallDir"
+Write-Host "Mihomo Core Mirror: $CoreMirror"
+Write-Host "Remote Config URL: $($RemoteConfigUrl -replace '^$', '<empty>') (Will be downloaded to $LocalConfigPath\config.yaml)"
+Write-Host "Local Config Path: $LocalConfigPath (Mihomo data directory)"
+Write-Host "Mihomo Port: $MihomoPort"
+Write-Host "Force Re-installation: $Force"
+Write-Host "`nPress Enter to proceed with installation, or Ctrl+C to cancel." -ForegroundColor Green
+Pause | Out-Null # Wait for user to press enter
+
+# --- Populate final configuration hashtable ---
+$ConfigToSave = @{
     installation_dir = $InstallDir
     mihomo_core_mirror = $CoreMirror
     geoip_url = $GeoIpUrl
@@ -32,19 +91,13 @@ $DefaultConfig = @{
     mmdb_url = $MmdbUrl
     remote_config_url = $RemoteConfigUrl
     local_config_path = $LocalConfigPath
-    log_file = (Join-Path $InstallDir "mihomo.log") # Use $InstallDir here directly
-    pid_file = (Join-Path $InstallDir "mihomo.pid")   # Use $InstallDir here directly
+    log_file = (Join-Path $InstallDir "mihomo.log")
+    pid_file = (Join-Path $InstallDir "mihomo.pid")
     mihomo_port = $MihomoPort
 }
 
-# --- Main Installation Logic ---
-Write-Log "Starting Miholess installation..."
-
-# Check for Administrator privileges
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Log "This script must be run with Administrator privileges. Please restart PowerShell as Administrator." "ERROR"
-    exit 1
-}
+$MiholessInstallDir = $InstallDir # Used globally within the script
+$MiholessServiceAccount = "NT AUTHORITY\System" # Remains constant
 
 # 1. Create installation directory
 if (-not (Test-Path -Path $MiholessInstallDir)) {
@@ -63,7 +116,7 @@ if (-not (Test-Path -Path $MiholessInstallDir)) {
 # 2. Save configuration to JSON file
 $ConfigFilePath = Join-Path $MiholessInstallDir "config.json"
 Write-Log "Saving configuration to $ConfigFilePath"
-$DefaultConfig | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFilePath -Encoding UTF8
+$ConfigToSave | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFilePath -Encoding UTF8
 
 # 3. Download and Extract Mihomo Core
 $mihomoDownloadUrl = Get-LatestMihomoDownloadUrl -OsType "windows" -Arch "amd64" -BaseMirror $CoreMirror

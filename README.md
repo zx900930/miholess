@@ -67,33 +67,40 @@ The `install.ps1` script is designed to be executed directly from a URL using `I
 Open **PowerShell as Administrator** and run:
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1'))
+Set-ExecutionPolicy Bypass -Scope Process -Force; `
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; `
+$tempPath = [System.IO.Path]::GetTempFileName() + ".ps1"; `
+(New-Object System.Net.WebClient).DownloadFile('https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1', $tempPath); `
+& $tempPath; `
+Remove-Item $tempPath -ErrorAction SilentlyContinue
 ```
 
-**Using a custom mirror or specific configuration (PowerShell as Administrator):**
+_(Note: The backticks `` ` `` at the end of lines are for multi-line commands in PowerShell and can be removed if pasted as a single line.)_
 
-You can pass parameters directly to the installation script to customize settings on the fly.
+**Explanation of the one-liner:**
 
-```powershell
-# Example: Install to a custom directory and use a custom GitHub mirror
-Set-ExecutionPolicy Bypass -Scope Process -Force
-C:\temp\install.ps1 -InstallDir "C:\MihomoAuto" -CoreMirror "https://ghfast.top/https://github.com/MetaCubeX/mihomo/releases/download/" -RemoteConfigUrl "https://myconfig.com/my-super-config.yaml" -LocalConfigPath "$env:USERPROFILE\MyMihomoConfigs"
+- `Set-ExecutionPolicy Bypass -Scope Process -Force`: This temporarily sets the PowerShell execution policy to `Bypass` for the current PowerShell session (process), allowing the script to run without security prompts. The `-Force` parameter suppresses the confirmation message.
+- `[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072`: This explicitly enables TLS 1.2 (value 3072) for web requests within the current session. This helps prevent issues when downloading files from HTTPS URLs, especially on older Windows versions.
+- `$tempPath = [System.IO.Path]::GetTempFileName() + ".ps1";`: Generates a unique temporary file name with a `.ps1` extension to store the downloaded script.
+- `(New-Object System.Net.WebClient).DownloadFile('...', $tempPath);`: Downloads the `install.ps1` script content from GitHub directly to the temporary file specified by `$tempPath`.
+- `& $tempPath;`: Executes the downloaded script file. This is the most reliable way to execute a PowerShell script interactively.
+- `Remove-Item $tempPath -ErrorAction SilentlyContinue`: Cleans up the temporary script file after the installation is complete.
 
-# Example: Force re-installation (if miholess is already installed)
-irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex -Force
-```
+**Interactive Setup Steps:**
 
-**Available Parameters for `install.ps1`:**
+Once the script starts, it will prompt you for the following information. Default values are provided in parentheses; press Enter to accept the default or type a new value.
 
-- `-InstallDir <path>`: Specifies the Miholess installation directory (default: `C:\ProgramData\miholess`).
-- `-CoreMirror <url>`: Base URL for Mihomo binary downloads (default: `https://github.com/MetaCubeX/mihomo/releases/download/`). Use this for GitHub mirrors.
-- `-GeoIpUrl <url>`: URL for the `geoip.dat` file.
-- `-GeoSiteUrl <url>`: URL for the `geosite.dat` file.
-- `-MmdbUrl <url>`: URL for the `country.mmdb` file.
-- `-RemoteConfigUrl <url>`: The single URL for your main Mihomo remote configuration file.
-- `-LocalConfigPath <path>`: A single folder path (e.g., `"%USERPROFILE%\my_configs"`). `miholess` will use this folder to store the `config.yaml` file that Mihomo will use.
-- `-MihomoPort <port>`: The port Mihomo will listen on (default: `7890`).
-- `-Force`: Forces re-installation, overwriting existing files, service, and scheduled tasks.
+- **Installation Directory:** Where Miholess and Mihomo files will be stored (e.g., `C:\ProgramData\miholess`).
+- **Mihomo Core Download Mirror URL:** Base URL for Mihomo binary downloads. Use this for GitHub mirrors (e.g., `https://ghfast.top/https://github.com/MetaCubeX/mihomo/releases/download/`).
+- **GeoIP.dat download URL**
+- **GeoSite.dat download URL**
+- **Country.mmdb download URL**
+- **Remote configuration URL:** The URL of your main Mihomo configuration file. Leave empty if you manage `config.yaml` locally.
+- **Local configuration folder path:** A folder where Mihomo's `config.yaml` (and potentially other data files) will reside (e.g., `%USERPROFILE%\miholess_local_configs`).
+- **Mihomo listen port:** The port Mihomo will listen on (default: `7890`).
+- **Force re-installation:** Choose Y/N if you want to overwrite an existing Miholess installation.
+
+After you provide all details, a summary will be displayed, and you'll be asked to press Enter to confirm and proceed.
 
 After installation, `miholess` will:
 
