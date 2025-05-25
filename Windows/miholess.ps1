@@ -99,7 +99,7 @@ try {
         -ArgumentList "-f `"$mihomoMainConfigPath`" -d `"$mihomoDataDir`"" `
         -WorkingDirectory $miholessInstallationDirNative `
         -RedirectStandardOutput $logFilePath `
-        -RedirectStandardError $logFilePath `
+        # -RedirectStandardError $logFilePath  <-- REMOVED THIS LINE
         -PassThru `
         -NoNewWindow `
         -ErrorAction Stop # Ensure errors from Start-Process are caught
