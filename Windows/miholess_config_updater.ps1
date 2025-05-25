@@ -30,20 +30,41 @@ if ($null -eq $config) {
 
 # Ensure LocalConfigPath uses system native backslashes for file operation when passed to helper
 $localConfigPathNative = $config.local_config_path.Replace('/', '\')
+$miholessInstallationDirNative = $config.installation_dir.Replace('/', '\') # Needed for miholess.ps1 path
+
+$configUpdated = $false # Flag to track if config was updated
 
 # Call the helper function to update the main Mihomo config from the remote URL
 if (Update-MihomoMainConfig `
     -RemoteConfigUrl $config.remote_config_url `
     -LocalConfigPath $localConfigPathNative) { # LocalConfigPath is native
 
-    Write-Log "Config Updater: Configuration updated. Restarting service..."
+    Write-Log "Config Updater: Configuration updated."
+    $configUpdated = $true
+} else {
+    Write-Log "Config Updater: No configuration changes detected."
+}
+
+# After config update, always re-run miholess.ps1 to refresh config and PID file if necessary
+# and then restart the service.
+if ($configUpdated) {
+    Write-Log "Config Updater: Config was updated. Running miholess.ps1 for config/PID refresh and then restarting service." "INFO"
+    $miholessSetupScriptPath = Join-Path $miholessInstallationDirNative "miholess.ps1"
+    try {
+        # Execute miholess.ps1 to ensure config/data are correct and PID is updated
+        # This script runs config update logic and updates PID file, then exits.
+        & "powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$miholessSetupScriptPath" | Out-Null
+        Write-Log "Config Updater: miholess.ps1 executed for setup refresh."
+    } catch {
+        $errorMessage = $_.Exception.Message
+        Write-Log "Config Updater: Failed to execute miholess.ps1 for setup refresh: $errorMessage." "ERROR"
+    }
+
     if (Restart-MiholessService) {
         Write-Log "Config Updater: Service restarted after config update."
     } else {
         Write-Log "Config Updater: Failed to restart service after config update. Please check manually." "ERROR"
     }
-} else {
-    Write-Log "Config Updater: No service restart needed."
 }
 
 Write-Log "Config Updater: Configuration update check finished."

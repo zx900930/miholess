@@ -141,7 +141,8 @@ $ConfigToSave = @{
     remote_config_url = $RemoteConfigUrl
     local_config_path = $global:MiholessLocalConfigPathJson
     log_file = "${global:MiholessInstallDirJson}/mihomo.log"
-    pid_file = "${global:MiholessInstallDirJson}/mihomo.pid" # PID file will still be written by miholess.ps1 for updates
+    # The pid_file is no longer directly used by NSSM, but miholess.ps1 might still write it for updater scripts.
+    pid_file = "${global:MiholessInstallDirJson}/mihomo.pid"
     mihomo_port = $MihomoPort
 }
 
@@ -212,7 +213,7 @@ try {
 $scriptsToDownload = @(
     "miholess_core_updater.ps1",
     "miholess_config_updater.ps1",
-    "miholess.ps1", # miholess.ps1 will be run directly by NSSM
+    "miholess.ps1", # miholess.ps1 will be used for config updates, not service run
     "uninstall.ps1" # Ensure uninstall script is present
 )
 foreach ($script in $scriptsToDownload) {
@@ -231,13 +232,18 @@ foreach ($script in $scriptsToDownload) {
 }
 
 
-# 6. Create Windows Service using NSSM
+# 6. Create Windows Service using NSSM to run Mihomo directly
 $serviceName = "MiholessService"
 $displayName = "Miholess Core Service"
 $description = "Manages Mihomo core and configurations, ensures autostart."
-# NSSM will execute powershell.exe -NoProfile -ExecutionPolicy Bypass -File <path_to_miholess.ps1>
-$nssmAppPath = "powershell.exe"
-$nssmAppArgs = "-NoProfile -ExecutionPolicy Bypass -File `"" + (Join-Path $global:MiholessInstallDirNative "miholess.ps1") + "`""
+# NSSM will execute mihomo.exe directly
+$nssmAppPath = Join-Path $global:MiholessInstallDirNative "mihomo.exe"
+# Mihomo arguments: -f <config_path> -d <data_dir>
+$mihomoMainConfigPathNative = (Join-Path $global:MiholessLocalConfigPathNative "config.yaml")
+$mihomoDataDirNative = $global:MiholessLocalConfigPathNative
+$nssmAppArgs = "-f `"${mihomoMainConfigPathNative}`" -d `"${mihomoDataDirNative}`""
+# Mihomo's working directory should be its own executable directory
+$mihomoWorkingDirectory = $global:MiholessInstallDirNative 
 $mihomoLogPathNative = $ConfigToSave.log_file.Replace('/', '\') # Mihomo's log path from config
 
 # Check if service exists and remove if Force is used
@@ -253,7 +259,7 @@ if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $serviceName) {
     Start-Sleep -Seconds 2 # Give it a moment to clean up
 }
 
-Write-Log "Creating Windows Service '${serviceName}' using NSSM..."
+Write-Log "Creating Windows Service '${serviceName}' using NSSM to run Mihomo directly..."
 try {
     # NSSM install command
     & "${nssmExePath}" install "${serviceName}" "${nssmAppPath}" "${nssmAppArgs}" | Out-Null
@@ -261,7 +267,7 @@ try {
     # NSSM service configuration
     & "${nssmExePath}" set "${serviceName}" DisplayName "${displayName}" | Out-Null
     & "${nssmExePath}" set "${serviceName}" Description "${description}" | Out-Null
-    & "${nssmExePath}" set "${serviceName}" AppDirectory "${global:MiholessInstallDirNative}" | Out-Null # Set working directory
+    & "${nssmExePath}" set "${serviceName}" AppDirectory "${mihomoWorkingDirectory}" | Out-Null # Set working directory for mihomo.exe
     & "${nssmExePath}" set "${serviceName}" AppStdout "${mihomoLogPathNative}" | Out-Null # Redirect stdout to Mihomo's log
     & "${nssmExePath}" set "${serviceName}" AppStderr "${mihomoLogPathNative}" | Out-Null # Redirect stderr to Mihomo's log
     & "${nssmExePath}" set "${serviceName}" AppStdoutCreationDisposition 4 | Out-Null # Always create/overwrite log
@@ -275,6 +281,14 @@ try {
     $dependCmd = "sc.exe config $serviceName depend= Nsi/TcpIp"
     Write-Log "Setting service dependency: $dependCmd"
     Invoke-Expression $dependCmd | Out-Null
+
+    # Before starting service, ensure initial config.yaml is ready for Mihomo
+    Write-Log "Ensuring initial config.yaml is ready for Mihomo service..."
+    if (-not (Update-MihomoMainConfig -RemoteConfigUrl $RemoteConfigUrl -LocalConfigPath $global:MiholessLocalConfigPathNative)) {
+        Write-Log "Failed to prepare initial Mihomo configuration. Service might not start correctly." "ERROR"
+        # Not exiting here as service creation might still be useful for manual debug
+    }
+
 
     # Start the service
     if (-not (Invoke-MiholessServiceCommand -Command "start" -ServiceName $serviceName)) {

@@ -58,7 +58,7 @@ Write-Log "Core Updater: Current Mihomo version: $currentMihomoVersion"
 
 $latestDownloadUrl = Get-LatestMihomoDownloadUrl `
     -OsType "windows" `
-    -Arch "amd664" ` # Typo here, should be "amd64"
+    -Arch "amd64" `
     -BaseMirror $config.mihomo_core_mirror
 
 if ($null -eq $latestDownloadUrl) {
@@ -77,6 +77,8 @@ if ($latestVersionMatch) {
 
 Write-Log "Core Updater: Latest available Mihomo version: $latestVersion"
 
+$coreUpdated = $false # Flag to track if core was updated
+
 # Simple version comparison (e.g., 1.19.0 > 1.18.9)
 if ($currentMihomoVersion -ne "Unknown" -and $latestVersion -ne "Unknown") {
     try {
@@ -87,12 +89,8 @@ if ($currentMihomoVersion -ne "Unknown" -and $latestVersion -ne "Unknown") {
             Write-Log "Core Updater: New Mihomo version (${latestVersion}) is available! Current: ${currentMihomoVersion}" "INFO"
             # Pass native path for DestinationDir
             if (Download-AndExtractMihomo -DownloadUrl $latestDownloadUrl -DestinationDir $miholessInstallationDirNative) {
-                Write-Log "Core Updater: Mihomo core updated. Restarting service..."
-                if (Restart-MiholessService) {
-                    Write-Log "Core Updater: Service restarted after core update."
-                } else {
-                    Write-Log "Core Updater: Failed to restart service after core update. Please check manually." "ERROR"
-                }
+                Write-Log "Core Updater: Mihomo core updated."
+                $coreUpdated = $true
             } else {
                 Write-Log "Core Updater: Failed to download and extract new Mihomo core." "ERROR"
             }
@@ -104,26 +102,42 @@ if ($currentMihomoVersion -ne "Unknown" -and $latestVersion -ne "Unknown") {
         Write-Log "Core Updater: Error comparing versions. Proceeding with download anyway: $errorMessage" "WARN"
         # Pass native path for DestinationDir
         if (Download-AndExtractMihomo -DownloadUrl $latestDownloadUrl -DestinationDir $miholessInstallationDirNative) {
-            Write-Log "Core Updater: Mihomo core updated (version comparison failed). Restarting service..."
-            if (Restart-MiholessService) {
-                Write-Log "Core Updater: Service restarted after core update."
-            } else {
-                Write-Log "Core Updater: Failed to restart service after core update. Please check manually." "ERROR"
-            }
+            Write-Log "Core Updater: Mihomo core updated (version comparison failed)."
+            $coreUpdated = $true
+        } else {
+            Write-Log "Core Updater: Failed to download and extract new Mihomo core." "ERROR"
         }
     }
 } else {
     Write-Log "Core Updater: Cannot determine current or latest version. Attempting to download latest anyway." "WARN"
     # Pass native path for DestinationDir
     if (Download-AndExtractMihomo -DownloadUrl $latestDownloadUrl -DestinationDir $miholessInstallationDirNative) {
-        Write-Log "Core Updater: Mihomo core updated (version comparison skipped). Restarting service..."
-        if (Restart-MiholessService) {
-            Write-Log "Core Updater: Service restarted after core update."
-        } else {
-            Write-Log "Core Updater: Failed to restart service after core update. Please check manually." "ERROR"
-        }
+        Write-Log "Core Updater: Mihomo core updated (version comparison skipped)."
+        $coreUpdated = $true
     } else {
         Write-Log "Core Updater: Failed to download and extract new Mihomo core." "ERROR"
+    }
+}
+
+# After core update, always re-run miholess.ps1 to refresh config and PID file if necessary
+# and then restart the service.
+if ($coreUpdated) {
+    Write-Log "Core Updater: Core was updated. Running miholess.ps1 for config/PID refresh and then restarting service." "INFO"
+    $miholessSetupScriptPath = Join-Path $miholessInstallationDirNative "miholess.ps1"
+    try {
+        # Execute miholess.ps1 to ensure config/data are correct and PID is updated
+        # This script runs config update logic and updates PID file, then exits.
+        & "powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$miholessSetupScriptPath" | Out-Null
+        Write-Log "Core Updater: miholess.ps1 executed for setup refresh."
+    } catch {
+        $errorMessage = $_.Exception.Message
+        Write-Log "Core Updater: Failed to execute miholess.ps1 for setup refresh: $errorMessage." "ERROR"
+    }
+
+    if (Restart-MiholessService) {
+        Write-Log "Core Updater: Service restarted after core update."
+    } else {
+        Write-Log "Core Updater: Failed to restart service after core update. Please check manually." "ERROR"
     }
 }
 
