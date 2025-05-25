@@ -172,8 +172,9 @@ if (-not (Download-AndExtractMihomo -DownloadUrl $mihomoDownloadUrl -Destination
 }
 
 # 4. Download GeoIP, GeoSite, MMDB files
-# Pass native path for InstallationDir
-if (-not (Download-MihomoDataFiles -InstallationDir $global:MiholessInstallDirNative -GeoIpUrl $GeoIpUrl -GeoSiteUrl $GeoSiteUrl -MmdbUrl $MmdbUrl)) {
+# IMPORTANT FIX: Download to the Mihomo data directory ($global:MiholessLocalConfigPathNative)
+# not the installation directory.
+if (-not (Download-MihomoDataFiles -InstallationDir $global:MiholessLocalConfigPathNative -GeoIpUrl $GeoIpUrl -GeoSiteUrl $GeoSiteUrl -MmdbUrl $MmdbUrl)) {
     Write-Log "Some data files failed to download. Check logs for details." "WARN"
 }
 
@@ -291,12 +292,13 @@ $commonSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -StopIfGoingO
 
 # Task: Mihomo Core Updater
 # Path for scheduled task uses forward slashes, will be converted by Register-MiholessScheduledTask
-$scriptCorePath = "${global:MiholessInstallDirJson}/miholess_core_updater.ps1"
+$taskNameCore = "${global:MiholessInstallDirJson}/miholess_core_updater.ps1"
 Register-MiholessScheduledTask -TaskName $taskNameCore -Description "Updates Mihomo core to the latest non-Go version." `
-    -ScriptPath $scriptCorePath -Triggers $triggerCore -Settings $commonSettings
+    -ScriptPath $taskNameCore -Triggers $triggerCore -Settings $commonSettings
 
 # Task: Mihomo Config Updater
 # Path for scheduled task uses forward slashes, will be converted by Register-MiholessScheduledTask
+$taskNameConfig = "Miholess_Config_Updater"
 $scriptConfigPath = "${global:MiholessInstallDirJson}/miholess_config_updater.ps1"
 # Run every hour starting at midnight, duration 1 day (meaning it will run for 24 hours, then then repeat daily)
 $triggerConfig = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 1) -At "00:00" 

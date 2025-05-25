@@ -167,7 +167,7 @@ function Download-AndExtractMihomo {
         return $false
     }
 
-    Write-Log "Extracting Mihomo to ${DestinationDir}" # Use ${} for safety
+    Write-Log "Extracting Mihomo to ${DestinationDir}"
     try {
         $targetExeName = "mihomo.exe"
         $targetExePath = Join-Path $DestinationDir $targetExeName # Native path
@@ -206,7 +206,7 @@ function Download-AndExtractMihomo {
                  Write-Log "Mihomo executable found as ${targetExeName} in ${DestinationDir}."
             }
         } else {
-            Write-Log "Could not find any mihomo executable (mihomo*.exe) after extraction in ${DestinationDir}." "ERROR" # Use ${} for safety
+            Write-Log "Could not find any mihomo executable (mihomo*.exe) after extraction in ${DestinationDir}." "ERROR"
             return $false
         }
     } catch {
@@ -223,12 +223,24 @@ function Download-AndExtractMihomo {
 
 function Download-MihomoDataFiles {
     Param(
-        [string]$InstallationDir, # This param receives native path from install.ps1
+        [string]$DestinationDir, # This param now explicitly means the target dir for data files
         [string]$GeoIpUrl,
         [string]$GeoSiteUrl,
         [string]$MmdbUrl
     )
-    Write-Log "Downloading data files..."
+    Write-Log "Downloading data files to ${DestinationDir}..."
+    # Ensure the destination directory exists before downloading
+    if (-not (Test-Path -Path $DestinationDir)) {
+        Write-Log "Creating data files directory: ${DestinationDir}" "INFO"
+        try {
+            New-Item -ItemType Directory -Path $DestinationDir -Force -ErrorAction Stop | Out-Null
+        } catch {
+            $errorMessage = $_.Exception.Message
+            Write-Log "Failed to create data files directory ${DestinationDir}: $errorMessage" "ERROR"
+            return $false
+        }
+    }
+
     $dataFiles = @{
         "geoip.dat" = $GeoIpUrl
         "geosite.dat" = $GeoSiteUrl
@@ -237,7 +249,7 @@ function Download-MihomoDataFiles {
     $success = $true
     foreach ($fileName in $dataFiles.Keys) {
         $url = $dataFiles[$fileName]
-        $destination = Join-Path $InstallationDir $fileName # Native path
+        $destination = Join-Path $DestinationDir $fileName # Native path
         try {
             Write-Log "Downloading ${fileName} from $url"
             Invoke-WebRequest -Uri $url -OutFile $destination -ErrorAction Stop
@@ -287,18 +299,37 @@ function Invoke-MiholessServiceCommand {
                 }
                 "remove" {
                     Remove-Service -Name $ServiceName -ErrorAction Stop
-                    Write-Log "Service '${ServiceName}' removed using cmdlet."
-                    return $true
+                    Write-Log "Service '${ServiceName}' deleted using cmdlet. Waiting for full removal..."
+                    # --- FIX: Poll until service is truly gone ---
+                    $maxWaitSeconds = 30 # Max wait time for service to disappear
+                    $intervalSeconds = 2 # Check every 2 seconds
+                    $waitedSeconds = 0
+                    do {
+                        Start-Sleep -Seconds $intervalSeconds
+                        $waitedSeconds += $intervalSeconds
+                        $serviceExists = (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue | Select-Object -First 1) -ne $null
+                        if ($serviceExists) {
+                            Write-Log "Service '${ServiceName}' still detected. Waited ${waitedSeconds}s..." "DEBUG"
+                        }
+                    } while ($serviceExists -and $waitedSeconds -lt $maxWaitSeconds)
+
+                    if (-not $serviceExists) {
+                        Write-Log "Service '${ServiceName}' confirmed fully removed after ${waitedSeconds}s."
+                        return $true
+                    } else {
+                        Write-Log "Service '${ServiceName}' still detected after ${maxWaitSeconds}s timeout. Manual reboot might be required." "ERROR"
+                        return $false
+                    }
+                    # --- END FIX ---
                 }
                 "create" {
                     New-Service -Name $ServiceName -DisplayName $DisplayName -Description $Description `
-                                -BinaryPathName $BinaryPathName -StartupType $StartupType -ErrorAction Stop # BinaryPathName is native
+                                -BinaryPathName $BinaryPathName -StartupType $StartupType -ErrorAction Stop
                     Write-Log "Service '${ServiceName}' created using cmdlet."
                     return $true
                 }
                 "start" {
-                    # Set-Service is not directly for start, but for StartupType; Start-Service is for immediate start
-                    Set-Service -Name $ServiceName -StartupType $StartupType -ErrorAction SilentlyContinue # Ensure startup type is set
+                    Set-Service -Name $ServiceName -StartupType $StartupType -ErrorAction SilentlyContinue
                     Start-Service -Name $ServiceName -ErrorAction Stop
                     Write-Log "Service '${ServiceName}' started using cmdlet."
                     return $true
@@ -322,7 +353,7 @@ function Invoke-MiholessServiceCommand {
             }
             "stop" {
                 $scResult = (sc.exe stop `"$ServiceName`" 2>&1)
-                if ($LASTEXITCODE -eq 0 -or $scResult -match "STATE +: 1 +STOPPED") { # Check for success or already stopped
+                if ($LASTEXITCODE -eq 0 -or $scResult -match "STATE +: 1 +STOPPED") {
                     Write-Log "Service '${ServiceName}' stopped using sc.exe."
                     return $true
                 } else {
@@ -332,18 +363,38 @@ function Invoke-MiholessServiceCommand {
             "remove" {
                 $scResult = (sc.exe delete `"$ServiceName`" 2>&1)
                 if ($LASTEXITCODE -eq 0) {
-                    Write-Log "Service '${ServiceName}' deleted using sc.exe."
-                    return $true
+                    Write-Log "Service '${ServiceName}' deleted using sc.exe. Waiting for full removal..."
+                    # --- FIX: Poll until service is truly gone using sc.exe query ---
+                    $maxWaitSeconds = 30 # Max wait time for service to disappear
+                    $intervalSeconds = 2 # Check every 2 seconds
+                    $waitedSeconds = 0
+                    do {
+                        Start-Sleep -Seconds $intervalSeconds
+                        $waitedSeconds += $intervalSeconds
+                        $scQueryOutput = (sc.exe query `"$ServiceName`" 2>&1)
+                        # Service exists if query successful and contains STATE (not ERROR 1060: The specified service does not exist)
+                        $serviceExists = ($LASTEXITCODE -eq 0 -and $scQueryOutput -match "STATE") 
+                        if ($serviceExists) {
+                            Write-Log "Service '${ServiceName}' still detected via sc.exe. Waited ${waitedSeconds}s..." "DEBUG"
+                        }
+                    } while ($serviceExists -and $waitedSeconds -lt $maxWaitSeconds)
+
+                    if (-not $serviceExists) {
+                        Write-Log "Service '${ServiceName}' confirmed fully removed after ${waitedSeconds}s."
+                        return $true
+                    } else {
+                        Write-Log "Service '${ServiceName}' still detected via sc.exe after ${maxWaitSeconds}s timeout. Manual reboot might be required." "ERROR"
+                        return $false
+                    }
+                    # --- END FIX ---
                 } else {
                     throw "sc.exe delete command failed: $scResult"
                 }
             }
             "create" {
-                # BinaryPathName should be native path.
                 $scResult = (sc.exe create `"$ServiceName`" binPath= `"$BinaryPathName`" DisplayName= `"$DisplayName`" start= `"$StartupType`" 2>&1)
                 if ($LASTEXITCODE -eq 0) {
                     Write-Log "Service '${ServiceName}' created using sc.exe."
-                    # Set description separately as part of create. sc.exe description command.
                     & sc.exe description $ServiceName "$Description" | Out-Null
                     return $true
                 } else {
