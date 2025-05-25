@@ -358,12 +358,14 @@ function Register-MiholessScheduledTask {
             }
         }
         
-        # Add common settings. /IT is needed for interactive tasks, /RL HIGHEST for admin context.
-        # /F for force, /RU SYSTEM for System account.
+        # Add common settings. /RL HIGHEST for admin context.
+        # /IT: Run only when user is logged on (or interact with user, needed for some contexts)
+        # /F: Force creation
+        # /RU SYSTEM: Run as System account
         $schtasksArgs += "/RL", "HIGHEST"
-        $schtasksArgs += "/IT" # Run only when user is logged on and allows interaction
+        $schtasksArgs += "/IT" 
         $schtasksArgs += "/F"
-        $schtasksArgs += "/RU", "SYSTEM" # Run as System account
+        $schtasksArgs += "/RU", "SYSTEM" 
 
         # Execute schtasks.exe with the argument array
         Write-Log "Executing schtasks command: schtasks.exe $($schtasksArgs -join ' ')" "DEBUG"
@@ -382,17 +384,17 @@ function Register-MiholessScheduledTask {
     }
 }
 
+# Task: Mihomo Core Updater
 $taskNameCore = "Miholess_Core_Updater"
 $scriptCorePath = "${global:MiholessInstallDirJson}/miholess_core_updater.ps1"
-$triggerCore = New-ScheduledTaskTrigger -Daily -At "03:00" # Dummy trigger var, not used directly by schtasks
-
+# No New-ScheduledTaskTrigger call here
 Register-MiholessScheduledTask -TaskName $taskNameCore -Description "Updates Mihomo core to the latest non-Go version." `
     -ScriptPath $scriptCorePath -ScheduleType "DAILY" -ScheduleTime "03:00"
 
+# Task: Mihomo Config Updater
 $taskNameConfig = "Miholess_Config_Updater"
 $scriptConfigPath = "${global:MiholessInstallDirJson}/miholess_config_updater.ps1"
-$triggerConfig = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 1) -At "00:00" # Dummy trigger var
-
+# No New-ScheduledTaskTrigger call here
 Register-MiholessScheduledTask -TaskName $taskNameConfig -Description "Updates Mihomo remote and local configurations." `
     -ScriptPath $scriptConfigPath -ScheduleType "HOURLY" -ScheduleTime "00:00" # Runs hourly starting at midnight
 
