@@ -4,23 +4,23 @@
 
 # Determine the actual installation directory for proper log path
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$configFilePath = Join-Path $scriptDir "config.json"
-$helperFunctionsPath = Join-Path $scriptDir "helper_functions.ps1"
+$configFilePath = Join-Path $scriptDir "config.json" # native path
+$helperFunctionsPath = Join-Path $scriptDir "helper_functions.ps1" # native path
 
 # --- CRITICAL: Source helper_functions.ps1 immediately ---
-if (Test-Path $helperFunctionsPath) {
+if (Test-Path $helperFunctionsPath) { # Test-Path uses native path
     . $helperFunctionsPath
 } else {
-    $fallbackLogPath = "C:\ProgramData\miholess\bootstrap_miholess_fatal.log"
+    $fallbackLogPath = "C:\ProgramData\miholess\bootstrap_miholess_fatal.log" # native path
     try {
-        "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [FATAL] (Miholess) helper_functions.ps1 not found at $helperFunctionsPath. Cannot operate. Exiting." | Out-File -FilePath $fallbackLogPath -Append -Encoding UTF8
+        "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [FATAL] (Miholess) helper_functions.ps1 not found at ${helperFunctionsPath}. Cannot operate. Exiting." | Out-File -FilePath $fallbackLogPath -Append -Encoding UTF8
     } catch {}
     exit 1 # Critical failure
 }
 # From this point, Write-Log is available.
 
-Write-Log "Miholess.ps1: Script started. Loading configuration from $configFilePath." "INFO"
-$config = Get-MiholessConfig -ConfigFilePath $configFilePath
+Write-Log "Miholess.ps1: Script started. Loading configuration from ${configFilePath}." "INFO"
+$config = Get-MiholessConfig -ConfigFilePath $configFilePath # Get-MiholessConfig expects native path
 
 if ($null -eq $config) {
     Write-Log "Miholess.ps1: Failed to load configuration. Exiting." "ERROR"
@@ -28,37 +28,40 @@ if ($null -eq $config) {
 }
 # At this point, $script:config is set, and Write-Log will use its log_file or installation_dir.
 
-$mihomoExePath = Join-Path $config.installation_dir "mihomo.exe"
-$mihomoMainConfigPath = Join-Path $config.local_config_path "config.yaml" # Mihomo will use this config
-$mihomoDataDir = $config.local_config_path # Mihomo will use this as its data directory
-$logFilePath = $config.log_file # This is Mihomo's own log file, not the service log.
-$pidFilePath = $config.pid_file
+# Convert paths from config (which are forward slashes) to native system backslashes for file operations
+$miholessInstallationDirLocal = $config.installation_dir.Replace('/', '\')
+$mihomoExePath = (Join-Path $miholessInstallationDirLocal "mihomo.exe")
+$mihomoMainConfigPath = (Join-Path $config.local_config_path.Replace('/', '\') "config.yaml")
+$mihomoDataDir = $config.local_config_path.Replace('/', '\')
+$logFilePath = $config.log_file.Replace('/', '\') # This is Mihomo's own log file
+$pidFilePath = (Join-Path $miholessInstallationDirLocal "mihomo.pid")
 
-Write-Log "Miholess.ps1: Checking for mihomo.exe at $mihomoExePath." "INFO"
-if (-not (Test-Path $mihomoExePath)) {
-    Write-Log "Miholess.ps1: mihomo.exe not found at $mihomoExePath. Please check installation. Exiting." "ERROR"
+Write-Log "Miholess.ps1: Checking for mihomo.exe at ${mihomoExePath}." "INFO"
+if (-not (Test-Path $mihomoExePath)) { # Test-Path uses native path
+    Write-Log "Miholess.ps1: mihomo.exe not found at ${mihomoExePath}. Please check installation. Exiting." "ERROR"
     exit 1
 } else {
     Write-Log "Miholess.ps1: mihomo.exe found." "INFO"
 }
 
 # Ensure the Mihomo main config file exists, if not, attempt to update it once
-Write-Log "Miholess.ps1: Checking for main config file at $mihomoMainConfigPath." "INFO"
-if (-not (Test-Path $mihomoMainConfigPath)) {
+Write-Log "Miholess.ps1: Checking for main config file at ${mihomoMainConfigPath}." "INFO"
+if (-not (Test-Path $mihomoMainConfigPath)) { # Test-Path uses native path
     Write-Log "Miholess.ps1: Mihomo main config file not found. Attempting initial update from remote..." "WARN"
     # Ensure local config path exists before attempting to download into it
-    if (-not (Test-Path $config.local_config_path)) {
-        Write-Log "Miholess.ps1: Creating local config directory: $($config.local_config_path)" "INFO"
+    if (-not (Test-Path $mihomoDataDir)) { # Test-Path uses native path
+        Write-Log "Miholess.ps1: Creating local config directory: ${mihomoDataDir}" "INFO"
         try {
-            New-Item -ItemType Directory -Path $config.local_config_path -ErrorAction Stop | Out-Null
+            New-Item -ItemType Directory -Path $mihomoDataDir -Force -ErrorAction Stop | Out-Null # New-Item uses native path
         } catch {
             $errorMessage = $_.Exception.Message
-            Write-Log "Miholess.ps1: Failed to create local config directory $($config.local_config_path): $errorMessage. Cannot proceed. Exiting." "ERROR"
+            Write-Log "Miholess.ps1: Failed to create local config directory ${mihomoDataDir}: $errorMessage. Cannot proceed. Exiting." "ERROR"
             exit 1
         }
     }
 
-    if (-not (Update-MihomoMainConfig -RemoteConfigUrl $config.remote_config_url -LocalConfigPath $config.local_config_path)) {
+    # Pass local config path to Update-MihomoMainConfig with native backslashes, as it expects it
+    if (-not (Update-MihomoMainConfig -RemoteConfigUrl $config.remote_config_url -LocalConfigPath $mihomoDataDir)) {
         Write-Log "Miholess.ps1: Failed to create initial Mihomo configuration. Please check your remote config URL and local config path settings. Exiting." "ERROR"
         exit 1
     }
@@ -68,33 +71,33 @@ if (-not (Test-Path $mihomoMainConfigPath)) {
 
 # Start Mihomo
 Write-Log "Miholess.ps1: Starting Mihomo process..." "INFO"
-Write-Log "Miholess.ps1: Mihomo executable: $mihomoExePath" "DEBUG"
-Write-Log "Miholess.ps1: Mihomo main config: $mihomoMainConfigPath" "DEBUG"
-Write-Log "Miholess.ps1: Mihomo data directory: $mihomoDataDir" "DEBUG"
-Write-Log "Miholess.ps1: Mihomo logging to: $logFilePath" "DEBUG"
+Write-Log "Miholess.ps1: Mihomo executable: ${mihomoExePath}" "DEBUG"
+Write-Log "Miholess.ps1: Mihomo main config: ${mihomoMainConfigPath}" "DEBUG"
+Write-Log "Miholess.ps1: Mihomo data directory: ${mihomoDataDir}" "DEBUG"
+Write-Log "Miholess.ps1: Mihomo logging to: ${logFilePath}" "DEBUG"
 
 # Create log file for Mihomo if it doesn't exist, and ensure its directory exists
-$mihomoLogDir = Split-Path $logFilePath -Parent
-if (-not (Test-Path $mihomoLogDir)) {
-    Write-Log "Miholess.ps1: Creating Mihomo log directory: $mihomoLogDir" "INFO"
+$mihomoLogDir = Split-Path $logFilePath -Parent # Native path
+if (-not (Test-Path $mihomoLogDir)) { # Test-Path uses native path
+    Write-Log "Miholess.ps1: Creating Mihomo log directory: ${mihomoLogDir}" "INFO"
     try {
-        New-Item -Path $mihomoLogDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        New-Item -Path $mihomoLogDir -ItemType Directory -Force -ErrorAction Stop | Out-Null # New-Item uses native path
     } catch {
         $errorMessage = $_.Exception.Message
-        Write-Log "Miholess.ps1: Failed to create Mihomo log directory $mihomoLogDir: $errorMessage. Mihomo logging might fail." "WARN"
+        Write-Log "Miholess.ps1: Failed to create Mihomo log directory ${mihomoLogDir}: $errorMessage. Mihomo logging might fail." "WARN"
     }
 }
-if (-not (Test-Path $logFilePath)) {
-    Write-Log "Miholess.ps1: Creating Mihomo log file: $logFilePath" "INFO"
-    New-Item -Path $logFilePath -ItemType File -Force | Out-Null
+if (-not (Test-Path $logFilePath)) { # Test-Path uses native path
+    Write-Log "Miholess.ps1: Creating Mihomo log file: ${logFilePath}" "INFO"
+    New-Item -Path $logFilePath -ItemType File -Force | Out-Null # New-Item uses native path
 }
 
 try {
-    # Start Mihomo as a background process, redirecting output to log file
-    # and storing the PID for later management.
+    # Arguments to Start-Process should use native paths for command line
+    # WorkingDirectory needs native backslashes
     $process = Start-Process -FilePath $mihomoExePath `
         -ArgumentList "-f `"$mihomoMainConfigPath`" -d `"$mihomoDataDir`"" `
-        -WorkingDirectory $config.installation_dir ` # Mihomo.exe should be run from its own dir
+        -WorkingDirectory $miholessInstallationDirLocal `
         -RedirectStandardOutput $logFilePath `
         -RedirectStandardError $logFilePath `
         -PassThru `
@@ -102,10 +105,9 @@ try {
         -ErrorAction Stop # Ensure errors from Start-Process are caught
     
     $pid = $process.Id
-    Set-Content -Path $pidFilePath -Value $pid
-    Write-Log "Miholess.ps1: Mihomo process started successfully with PID: $pid. Script exiting gracefully to allow service wrapper to monitor." "INFO"
+    Set-Content -Path $pidFilePath -Value $pid # Set-Content uses native path
+    Write-Log "Miholess.ps1: Mihomo process started successfully with PID: ${pid}. Script exiting gracefully to allow service wrapper to monitor." "INFO"
 
-    # This script's job is done; the service wrapper will monitor the process.
     exit 0
 
 } catch {

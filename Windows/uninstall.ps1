@@ -2,15 +2,16 @@
 
 # Source helper functions first for logging
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$helperFunctionsPath = Join-Path $scriptDir "helper_functions.ps1"
+$configFilePath = Join-Path $scriptDir "config.json" # native path
+$helperFunctionsPath = Join-Path $scriptDir "helper_functions.ps1" # native path
 
-if (Test-Path $helperFunctionsPath) {
+if (Test-Path $helperFunctionsPath) { # Test-Path uses native path
     . $helperFunctionsPath
 } else {
     # Fallback temporary logger if helper_functions.ps1 is missing
-    $fallbackLogPath = "C:\ProgramData\miholess\bootstrap_updater_uninstall_fatal.log"
+    $fallbackLogPath = "C:\ProgramData\miholess\bootstrap_updater_uninstall_fatal.log" # native path
     try {
-        "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [FATAL] (Updater/Uninstall) helper_functions.ps1 not found at $helperFunctionsPath. Cannot log properly. Exiting." | Out-File -FilePath $fallbackLogPath -Append -Encoding UTF8
+        "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [FATAL] (Updater/Uninstall) helper_functions.ps1 not found at ${helperFunctionsPath}. Cannot log properly. Exiting." | Out-File -FilePath $fallbackLogPath -Append -Encoding UTF8
     } catch {}
     exit 1 # Critical failure
 }
@@ -31,7 +32,7 @@ $serviceName = "MiholessService"
 if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $serviceName) {
     Write-Log "Stopping service '${serviceName}'..."
     if (-not (Invoke-MiholessServiceCommand -Command "stop" -ServiceName $serviceName)) {
-        Write-Log "Failed to stop service '${serviceName}'. Attempting to remove anyway." "WARN"
+        Write-Log "Failed to stop existing service '${serviceName}'. Attempting to remove anyway." "WARN"
     }
     Write-Log "Removing service '${serviceName}'..."
     if (Invoke-MiholessServiceCommand -Command "remove" -ServiceName $serviceName) {
@@ -50,31 +51,42 @@ $taskNames = @(
 )
 foreach ($taskName in $taskNames) {
     if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-        Write-Log "Unregistering scheduled task '$taskName'..."
+        Write-Log "Unregistering scheduled task '${taskName}'..."
         try {
             Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
-            Write-Log "Scheduled task '$taskName' unregistered successfully."
+            Write-Log "Scheduled task '${taskName}' unregistered successfully."
         } catch {
             $errorMessage = $_.Exception.Message
-            Write-Log "Failed to unregister scheduled task '$taskName': $errorMessage" "ERROR"
+            Write-Log "Failed to unregister scheduled task '${taskName}': $errorMessage" "ERROR"
         }
     } else {
-        Write-Log "Scheduled task '$taskName' not found." "INFO"
+        Write-Log "Scheduled task '${taskName}' not found." "INFO"
     }
 }
 
 # 3. Delete installation directory
-if (Test-Path -Path $MiholessInstallDir) {
-    Write-Log "Deleting installation directory: $MiholessInstallDir"
+# Read installation_dir from config.json if it exists, otherwise use default
+$loadedConfig = Get-MiholessConfig -ConfigFilePath $configFilePath # Get-MiholessConfig expects native path
+if ($loadedConfig -and $loadedConfig.installation_dir) {
+    # Convert forward slashes from config to native backslashes for file system operations
+    $MiholessInstallDir = $loadedConfig.installation_dir.Replace('/', '\')
+    Write-Log "Using configured installation directory for uninstallation: ${MiholessInstallDir}"
+} else {
+    # $MiholessInstallDir is default, already native
+    Write-Log "Could not load installation directory from config.json. Using default: ${MiholessInstallDir}" "WARN"
+}
+
+if (Test-Path -Path $MiholessInstallDir) { # Test-Path uses native path
+    Write-Log "Deleting installation directory: ${MiholessInstallDir}"
     try {
-        Remove-Item -Path $MiholessInstallDir -Recurse -Force -ErrorAction Stop
+        Remove-Item -Path $MiholessInstallDir -Recurse -Force -ErrorAction Stop # Remove-Item uses native path
         Write-Log "Installation directory removed successfully."
     } catch {
         $errorMessage = $_.Exception.Message
-        Write-Log "Failed to remove installation directory '$MiholessInstallDir': $errorMessage" "ERROR"
+        Write-Log "Failed to remove installation directory '${MiholessInstallDir}': $errorMessage" "ERROR"
     }
 } else {
-    Write-Log "Installation directory '$MiholessInstallDir' not found." "INFO"
+    Write-Log "Installation directory '${MiholessInstallDir}' not found." "INFO"
 }
 
 Write-Log "Miholess uninstallation completed."
