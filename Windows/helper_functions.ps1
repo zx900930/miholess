@@ -64,12 +64,12 @@ function Get-LatestMihomoDownloadUrl {
     Write-Log "DEBUG: Found $($assets.Count) assets."
 
     $osArchPattern = "mihomo-${OsType}-${Arch}"
-    # FIX: Explicitly define $candidateUrls as an ArrayList to prevent unexpected type coercions
+    # Initialize $candidateUrls as an ArrayList to prevent unexpected type coercions
     [System.Collections.ArrayList]$candidateUrls = @() 
 
     foreach ($asset in $assets) {
         $assetName = $asset.name
-        # FIX: Explicitly cast to string to ensure the download URL is always a string type
+        # Explicitly cast to string to ensure the download URL is always a string type
         [string]$downloadUrl = $asset.browser_download_url 
 
         if (-not $assetName -or -not $downloadUrl) {
@@ -90,15 +90,15 @@ function Get-LatestMihomoDownloadUrl {
 
         # Prioritize 'compatible' versions by adding them to the beginning
         if ($assetName -match 'compatible') {
-            # FIX: Use ArrayList's Insert method which is more predictable for prepending
-            $candidateUrls.Insert(0, $downloadUrl) 
+            # Use ArrayList's Insert method and suppress its output
+            $candidateUrls.Insert(0, $downloadUrl) | Out-Null
         } else {
-            # FIX: Use ArrayList's Add method
-            $candidateUrls.Add($downloadUrl) 
+            # Use ArrayList's Add method and suppress its output
+            $candidateUrls.Add($downloadUrl) | Out-Null
         }
     }
 
-    # FIX: Check count for ArrayList directly
+    # Check count for ArrayList directly
     if ($candidateUrls.Count -eq 0) { 
         Write-Log "No suitable Mihomo binary found for ${OsType}-${Arch} (excluding Go versions: ${ExcludeGoVersions})." "ERROR"
         return $null
@@ -211,7 +211,7 @@ function Download-MihomoDataFiles {
             # Store exception message in a variable to avoid parsing issues
             $errorMessage = $_.Exception.Message
             Write-Log "Failed to download ${fileName}: $errorMessage" "WARN"
-            $success = false
+            $success = $false
         }
     }
     return $success
