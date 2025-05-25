@@ -66,23 +66,28 @@ if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $serviceName) {
     Write-Log "Service '${serviceName}' not found." "INFO"
 }
 
-# 2. Unregister Scheduled Tasks
+# 2. Unregister Scheduled Tasks using schtasks.exe
 $taskNames = @(
     "Miholess_Core_Updater",
     "Miholess_Config_Updater"
 )
 foreach ($taskName in $taskNames) {
-    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-        Write-Log "Unregistering scheduled task '${taskName}'..."
-        try {
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
-            Write-Log "Scheduled task '${taskName}' unregistered successfully."
-        } catch {
-            $errorMessage = $_.Exception.Message
-            Write-Log "Failed to unregister scheduled task '${taskName}': $errorMessage" "ERROR"
+    Write-Log "Attempting to unregister scheduled task '${taskName}' using schtasks.exe..."
+    try {
+        $taskQuery = (schtasks.exe /query /TN `"${taskName}`" /FO LIST 2>&1)
+        if ($LASTEXITCODE -eq 0) { # Task exists
+            $result = (schtasks.exe /delete /TN `"${taskName}`" /F 2>&1)
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "Scheduled task '${taskName}' unregistered successfully using schtasks.exe."
+            } else {
+                throw "schtasks.exe /delete command failed: $result"
+            }
+        } else {
+            Write-Log "Scheduled task '${taskName}' not found. Skipping unregistration." "INFO"
         }
-    } else {
-        Write-Log "Scheduled task '${taskName}' not found." "INFO"
+    } catch {
+        $errorMessage = $_.Exception.Message
+        Write-Log "Failed to unregister scheduled task '${taskName}': $errorMessage" "ERROR"
     }
 }
 
