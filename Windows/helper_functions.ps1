@@ -2,7 +2,7 @@
 
 # Define a default log path for background scripts. This path will be used if a more specific path
 # from config.json cannot be determined (e.g., during early script startup).
-$global:MiholessDefaultServiceLogPath = "C:\ProgramData\miholess\miholess_service.log"
+$global:MiholessDefaultServiceLogPath = "C:\ProgramData\miholess\miholess_service.log" # Native path for this fallback
 
 function Write-Log {
     Param([string]$Message, [string]$Level = "INFO")
@@ -13,20 +13,19 @@ function Write-Log {
     $logEntry | Out-Host
     
     # Determine the log file path for background logging
-    $targetLogFile = $global:MiholessDefaultServiceLogPath # Start with default fallback
+    $targetLogFile = $global:MiholessDefaultServiceLogPath # Start with default fallback (native path)
 
     # Attempt to get the log file path from a loaded configuration
     # This requires the calling script (e.g., miholess_service_wrapper.ps1) to have loaded $config
     # and potentially set $script:config for global access.
     # We prioritize mihomo.log if it's explicitly set in config, otherwise use miholess_service.log.
     try {
-        # Check if a global $config variable exists and has relevant properties
-        if ($script:config -and $script:config.log_file -and ($script:config.log_file -ne (Join-Path $script:config.installation_dir "mihomo.log"))) {
-            # Use Mihomo's specific log file if it's different from default
-            $targetLogFile = $script:config.log_file
+        if ($script:config -and $script:config.log_file) {
+            # Use config.log_file, convert to native path for file system
+            $targetLogFile = $script:config.log_file.Replace('/', '\')
         } elseif ($script:config -and $script:config.installation_dir) {
-            # Otherwise, use miholess_service.log within the installation directory
-            $targetLogFile = Join-Path $script:config.installation_dir "miholess_service.log"
+            # Otherwise, use miholess_service.log within the installation directory, convert to native path
+            $targetLogFile = (Join-Path $script:config.installation_dir "miholess_service.log").Replace('/', '\')
         }
     } catch {
         # Ignore errors if config isn't available yet or is malformed.
@@ -39,8 +38,7 @@ function Write-Log {
         try {
             New-Item -ItemType Directory -Path $logDir -ErrorAction Stop | Out-Null
         } catch {
-            # If log directory cannot be created, output error to console and proceed without file logging
-            $errorMessage = $_.Exception.Message # Capture error message reliably
+            $errorMessage = $_.Exception.Message
             "[$Timestamp][ERROR] Failed to create log directory ${logDir}: $errorMessage" | Out-Host
             return # Skip file logging
         }
@@ -50,28 +48,25 @@ function Write-Log {
     try {
         $logEntry | Out-File -FilePath $targetLogFile -Append -Encoding UTF8 -ErrorAction SilentlyContinue
     } catch {
-        # If writing to file fails (e.g., permission denied), output to console as a last resort
-        $errorMessage = $_.Exception.Message # Capture error message reliably
+        $errorMessage = $_.Exception.Message
         "[$Timestamp][ERROR] Failed to write to log file ${targetLogFile}: $errorMessage" | Out-Host
     }
 }
 
 function Get-MiholessConfig {
-    Param([string]$ConfigFilePath)
+    Param([string]$ConfigFilePath) # ConfigFilePath is already native path
     if (-not (Test-Path -Path $ConfigFilePath)) {
         Write-Log "Configuration file not found at $ConfigFilePath." "ERROR"
         return $null
     }
     try {
-        # Expand environment variables in the config file
         $rawConfigContent = Get-Content -Path $ConfigFilePath | Out-String
+        # Environment variables are expanded here, but paths like C:/... should remain with /
         $expandedConfigContent = [System.Environment]::ExpandEnvironmentVariables($rawConfigContent)
         
-        # Load the configuration into a script-scope variable so Write-Log can access it
         $script:config = $expandedConfigContent | ConvertFrom-Json
         return $script:config
     } catch {
-        # Store exception message in a variable to avoid parsing issues
         $errorMessage = $_.Exception.Message
         Write-Log "Failed to read or parse configuration file: $errorMessage" "ERROR"
         return $null
@@ -91,7 +86,6 @@ function Get-LatestMihomoDownloadUrl {
     try {
         $releaseInfo = Invoke-RestMethod -Uri $apiUrl -Method Get -ErrorAction Stop
     } catch {
-        # Store exception message in a variable to avoid parsing issues
         $errorMessage = $_.Exception.Message
         Write-Log "Error fetching release info from GitHub API: $errorMessage" "ERROR"
         return $null
@@ -112,50 +106,41 @@ function Get-LatestMihomoDownloadUrl {
     Write-Log "DEBUG: Found $($assets.Count) assets."
 
     $osArchPattern = "mihomo-${OsType}-${Arch}"
-    # Initialize $candidateUrls as an ArrayList to prevent unexpected type coercions
     [System.Collections.ArrayList]$candidateUrls = @() 
 
     foreach ($asset in $assets) {
         $assetName = $asset.name
-        # Explicitly cast to string to ensure the download URL is always a string type
         [string]$downloadUrl = $asset.browser_download_url 
 
         if (-not $assetName -or -not $downloadUrl) {
             continue
         }
 
-        # Check for OS and Architecture
         if ($assetName -notmatch $osArchPattern) {
             continue
         }
 
-        # Exclude Go version specific builds if requested
         if ($ExcludeGoVersions -and ($assetName -match '-go\d+\b')) {
             continue
         }
         
         Write-Log "DEBUG: Candidate - Asset: ${assetName}, URL: ${downloadUrl}"
 
-        # Prioritize 'compatible' versions by adding them to the beginning
         if ($assetName -match 'compatible') {
-            # Use ArrayList's Insert method and suppress its output
             $candidateUrls.Insert(0, $downloadUrl) | Out-Null
         } else {
-            # Use ArrayList's Add method and suppress its output
             $candidateUrls.Add($downloadUrl) | Out-Null
         }
     }
 
-    # Check count for ArrayList directly
     if ($candidateUrls.Count -eq 0) { 
         Write-Log "No suitable Mihomo binary found for ${OsType}-${Arch} (excluding Go versions: ${ExcludeGoVersions})." "ERROR"
         return $null
     }
     Write-Log "DEBUG: Found $($candidateUrls.Count) candidate URLs. First candidate: $($candidateUrls[0])"
 
-    $finalUrl = $candidateUrls[0] # Get the highest priority URL
+    $finalUrl = $candidateUrls[0]
 
-    # If a custom mirror is provided, replace the base GitHub URL
     if ($BaseMirror -ne "https://github.com/MetaCubeX/mihomo/releases/download/" -and $finalUrl -match "github.com/MetaCubeX/mihomo/releases/download/") {
         $relativePath = $finalUrl -replace "https://github.com/MetaCubeX/mihomo/releases/download/", ""
         $finalUrl = Join-Path -Path $BaseMirror -ChildPath $relativePath
@@ -169,31 +154,29 @@ function Get-LatestMihomoDownloadUrl {
 function Download-AndExtractMihomo {
     Param(
         [string]$DownloadUrl,
-        [string]$DestinationDir
+        [string]$DestinationDir # This param receives native path from install.ps1
     )
     Write-Log "Downloading Mihomo from $DownloadUrl"
-    $zipFile = Join-Path -Path $env:TEMP -ChildPath "mihomo_temp_$(Get-Random).zip" # Use random name to avoid conflicts
+    $zipFile = Join-Path -Path $env:TEMP -ChildPath "mihomo_temp_$(Get-Random).zip" # Use native path
 
     try {
         Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipFile -ErrorAction Stop
     } catch {
-        # Store exception message in a variable to avoid parsing issues
         $errorMessage = $_.Exception.Message
         Write-Log "Failed to download Mihomo: $errorMessage" "ERROR"
         return $false
     }
 
-    Write-Log "Extracting Mihomo to $DestinationDir"
+    Write-Log "Extracting Mihomo to $DestinationDir" # This is native path
     try {
         $targetExeName = "mihomo.exe"
-        $targetExePath = Join-Path $DestinationDir $targetExeName
+        $targetExePath = Join-Path $DestinationDir $targetExeName # Native path
 
-        # Stop existing mihomo process if it's running from the target path
-        if (Test-Path $targetExePath) {
+        if (Test-Path $targetExePath) { # Test-Path uses native path
             Write-Log "Existing ${targetExeName} found. Attempting to stop process before replacing..." "WARN"
             try {
                 Get-Process -Name "mihomo" -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Path -eq $targetExePath } |
+                    Where-Object { $_.Path -eq $targetExePath } | # Where-Object uses native path
                     Stop-Process -Force -ErrorAction SilentlyContinue
                 Write-Log "Stopped existing mihomo process."
                 Start-Sleep -Seconds 1
@@ -204,24 +187,19 @@ function Download-AndExtractMihomo {
             Remove-Item $targetExePath -ErrorAction SilentlyContinue
         }
 
-        # Expand the archive
-        Expand-Archive -LiteralPath $zipFile -DestinationPath $DestinationDir -Force
-
-        # Find the actual Mihomo executable after extraction
-        # It might be named mihomo-windows-amd64-compatible.exe or mihomo.exe directly
-        $extractedExe = Get-ChildItem -Path $DestinationDir -Filter "mihomo*.exe" -Recurse |
+        Expand-Archive -LiteralPath $zipFile -DestinationPath $DestinationDir -Force # Native path
+        
+        $extractedExe = Get-ChildItem -Path $DestinationDir -Filter "mihomo*.exe" -Recurse | # Native path
                         Where-Object { $_.Name -like "mihomo*${Arch}*.exe" -or $_.Name -eq "mihomo.exe" } |
                         Select-Object -First 1
 
         if ($extractedExe) {
-            # If the found executable is not already named mihomo.exe and not in the root
             if ($extractedExe.Name -ne $targetExeName -or $extractedExe.DirectoryName -ne $DestinationDir) {
                 Write-Log "Renaming and moving '${extractedExe.Name}' to '${targetExePath}'."
-                Move-Item -Path $extractedExe.FullName -Destination $targetExePath -Force
+                Move-Item -Path $extractedExe.FullName -Destination $targetExePath -Force # Native path
                 
-                # Clean up empty parent directories if it was moved from a subfolder
                 $parentDir = $extractedExe.Directory
-                if ($parentDir.FullName -ne $DestinationDir -and (Get-ChildItem -Path $parentDir.FullName).Count -eq 0) {
+                if ($parentDir.FullName -ne $DestinationDir -and (Get-ChildItem -Path $parentDir.FullName).Count -eq 0) { # Native path
                     Remove-Item -Path $parentDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
                 }
             } else {
@@ -232,7 +210,6 @@ function Download-AndExtractMihomo {
             return $false
         }
     } catch {
-        # Store exception message in a variable to avoid parsing issues
         $errorMessage = $_.Exception.Message
         Write-Log "Failed to extract Mihomo: $errorMessage" "ERROR"
         return $false
@@ -246,7 +223,7 @@ function Download-AndExtractMihomo {
 
 function Download-MihomoDataFiles {
     Param(
-        [string]$InstallationDir,
+        [string]$InstallationDir, # This param receives native path from install.ps1
         [string]$GeoIpUrl,
         [string]$GeoSiteUrl,
         [string]$MmdbUrl
@@ -260,12 +237,11 @@ function Download-MihomoDataFiles {
     $success = $true
     foreach ($fileName in $dataFiles.Keys) {
         $url = $dataFiles[$fileName]
-        $destination = Join-Path $InstallationDir $fileName
+        $destination = Join-Path $InstallationDir $fileName # Native path
         try {
             Write-Log "Downloading ${fileName} from $url"
             Invoke-WebRequest -Uri $url -OutFile $destination -ErrorAction Stop
         } catch {
-            # Store exception message in a variable to avoid parsing issues
             $errorMessage = $_.Exception.Message
             Write-Log "Failed to download ${fileName}: $errorMessage" "WARN"
             $success = $false
@@ -281,11 +257,11 @@ function Invoke-MiholessServiceCommand {
         [string]$ServiceName,
         [string]$DisplayName = "",
         [string]$Description = "",
-        [string]$BinaryPathName = "", # For create command
+        [string]$BinaryPathName = "", # For create command (expected native path)
         [string]$StartupType = "auto" # "auto", "demand", "disabled" for create command
     )
 
-    Write-Log "Attempting service '$Command' for '$ServiceName'..."
+    Write-Log "Attempting service '${Command}' for '${ServiceName}'..." # Using ${} here for safety
 
     # Check for cmdlet availability
     $cmdletAvailable = $false
@@ -316,13 +292,12 @@ function Invoke-MiholessServiceCommand {
                 }
                 "create" {
                     New-Service -Name $ServiceName -DisplayName $DisplayName -Description $Description `
-                                -BinaryPathName $BinaryPathName -StartupType $StartupType -ErrorAction Stop
+                                -BinaryPathName $BinaryPathName -StartupType $StartupType -ErrorAction Stop # BinaryPathName is native
                     Write-Log "Service '${ServiceName}' created using cmdlet."
                     return $true
                 }
                 "start" {
                     # Set-Service is not directly for start, but for StartupType; Start-Service is for immediate start
-                    # Also handles the case where service might be stopped already but we want to ensure it's running
                     Set-Service -Name $ServiceName -StartupType $StartupType -ErrorAction SilentlyContinue # Ensure startup type is set
                     Start-Service -Name $ServiceName -ErrorAction Stop
                     Write-Log "Service '${ServiceName}' started using cmdlet."
@@ -331,11 +306,11 @@ function Invoke-MiholessServiceCommand {
             }
         } catch {
             $errorMessage = $_.Exception.Message
-            Write-Log "Cmdlet for service '$Command' failed for '${ServiceName}': $errorMessage. Falling back to sc.exe." "WARN"
+            Write-Log "Cmdlet for service '${Command}' failed for '${ServiceName}': $errorMessage. Falling back to sc.exe." "WARN"
             # Fall through to sc.exe block
         }
     } else {
-        Write-Log "Cmdlet for service '$Command' not found. Falling back to sc.exe." "WARN"
+        Write-Log "Cmdlet for service '${Command}' not found. Falling back to sc.exe." "WARN"
     }
 
     # Fallback to sc.exe
@@ -364,6 +339,7 @@ function Invoke-MiholessServiceCommand {
                 }
             }
             "create" {
+                # BinaryPathName should be native path.
                 $scResult = (sc.exe create `"$ServiceName`" binPath= `"$BinaryPathName`" DisplayName= `"$DisplayName`" start= `"$StartupType`" 2>&1)
                 if ($LASTEXITCODE -eq 0) {
                     Write-Log "Service '${ServiceName}' created using sc.exe."
@@ -384,13 +360,13 @@ function Invoke-MiholessServiceCommand {
                 }
             }
             default {
-                Write-Log "Unsupported service command for sc.exe: $Command" "ERROR"
+                Write-Log "Unsupported service command for sc.exe: ${Command}" "ERROR" # Using ${} here
                 return $false
             }
         }
     } catch {
         $errorMessage = $_.Exception.Message
-        Write-Log "Final attempt with sc.exe for service '$Command' for '${ServiceName}' failed: $errorMessage" "ERROR"
+        Write-Log "Final attempt with sc.exe for service '${Command}' for '${ServiceName}' failed: $errorMessage" "ERROR"
         return $false
     }
 }
@@ -429,7 +405,7 @@ function Restart-MiholessService {
 function Update-MihomoMainConfig {
     Param(
         [string]$RemoteConfigUrl,
-        [string]$LocalConfigPath # This is now the target folder for config.yaml
+        [string]$LocalConfigPath # This param receives native path
     )
     Write-Log "Updating Mihomo main configuration from remote URL..."
 
@@ -437,19 +413,19 @@ function Update-MihomoMainConfig {
         Write-Log "No remote configuration URL provided. Skipping config update." "INFO"
         return $false
     }
+    # Test-Path uses native path
     if (-not (Test-Path -Path $LocalConfigPath)) {
-        Write-Log "Local config directory not found: ${LocalConfigPath}. Creating it." "INFO" # <-- FIX: ${LocalConfigPath}
+        Write-Log "Local config directory not found: ${LocalConfigPath}. Creating it." "INFO"
         try {
-            New-Item -ItemType Directory -Path $LocalConfigPath | Out-Null
+            New-Item -ItemType Directory -Path $LocalConfigPath -ErrorAction Stop | Out-Null
         } catch {
-            # Store exception message in a variable to avoid parsing issues
             $errorMessage = $_.Exception.Message
             Write-Log "Failed to create local config directory: $errorMessage" "ERROR"
             return $false
         }
     }
 
-    $targetConfigFilePath = Join-Path $LocalConfigPath "config.yaml"
+    $targetConfigFilePath = Join-Path $LocalConfigPath "config.yaml" # Target path is native
     Write-Log "Downloading remote config from: ${RemoteConfigUrl} to ${targetConfigFilePath}"
 
 
@@ -457,7 +433,6 @@ function Update-MihomoMainConfig {
     try {
         $newConfigContent = Invoke-WebRequest -Uri $RemoteConfigUrl -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content
     } catch {
-        # Store exception message in a variable to avoid parsing issues
         $errorMessage = $_.Exception.Message
         Write-Log "Failed to download remote config from ${RemoteConfigUrl}: $errorMessage" "ERROR"
         return $false
@@ -469,11 +444,10 @@ function Update-MihomoMainConfig {
     }
 
     $existingConfigContent = ""
-    if (Test-Path $targetConfigFilePath) {
+    if (Test-Path $targetConfigFilePath) { # Test-Path uses native path
         try {
             $existingConfigContent = (Get-Content -Path $targetConfigFilePath | Out-String).Trim()
         } catch {
-            # Store exception message in a variable to avoid parsing issues
             $errorMessage = $_.Exception.Message
             Write-Log "Failed to read existing config at ${targetConfigFilePath}: $errorMessage" "WARN"
         }
@@ -482,11 +456,10 @@ function Update-MihomoMainConfig {
     if ($newConfigContent.Trim() -ne $existingConfigContent) {
         Write-Log "Configuration content changed. Saving new config..."
         try {
-            $newConfigContent | Out-File -FilePath $targetConfigFilePath -Encoding UTF8 -Force
+            $newConfigContent | Out-File -FilePath $targetConfigFilePath -Encoding UTF8 -Force # Out-File uses native path
             Write-Log "Main Mihomo config saved to $targetConfigFilePath"
             return $true # Indicates a change was made
         } catch {
-            # Store exception message in a variable to avoid parsing issues
             $errorMessage = $_.Exception.Message
             Write-Log "Failed to save final Mihomo config: $errorMessage" "ERROR"
             return $false
