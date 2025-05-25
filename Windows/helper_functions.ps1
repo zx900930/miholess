@@ -41,7 +41,7 @@ function Write-Log {
         } catch {
             # If log directory cannot be created, output error to console and proceed without file logging
             $errorMessage = $_.Exception.Message # Capture error message reliably
-            "[$Timestamp][ERROR] Failed to create log directory ${logDir}: $errorMessage" | Out-Host # <-- FIX: ${logDir}
+            "[$Timestamp][ERROR] Failed to create log directory ${logDir}: $errorMessage" | Out-Host
             return # Skip file logging
         }
     }
@@ -52,7 +52,7 @@ function Write-Log {
     } catch {
         # If writing to file fails (e.g., permission denied), output to console as a last resort
         $errorMessage = $_.Exception.Message # Capture error message reliably
-        "[$Timestamp][ERROR] Failed to write to log file ${targetLogFile}: $errorMessage" | Out-Host # <-- FIX: ${targetLogFile}
+        "[$Timestamp][ERROR] Failed to write to log file ${targetLogFile}: $errorMessage" | Out-Host
     }
 }
 
@@ -274,22 +274,152 @@ function Download-MihomoDataFiles {
     return $success
 }
 
+
+function Invoke-MiholessServiceCommand {
+    Param(
+        [string]$Command, # Valid commands: "query", "stop", "remove", "create", "start"
+        [string]$ServiceName,
+        [string]$DisplayName = "",
+        [string]$Description = "",
+        [string]$BinaryPathName = "", # For create command
+        [string]$StartupType = "auto" # "auto", "demand", "disabled" for create command
+    )
+
+    Write-Log "Attempting service '$Command' for '$ServiceName'..."
+
+    # Check for cmdlet availability
+    $cmdletAvailable = $false
+    switch ($Command) {
+        "query"  { if (Get-Command -Name "Get-Service" -ErrorAction SilentlyContinue) { $cmdletAvailable = $true } }
+        "stop"   { if (Get-Command -Name "Stop-Service" -ErrorAction SilentlyContinue) { $cmdletAvailable = $true } }
+        "remove" { if (Get-Command -Name "Remove-Service" -ErrorAction SilentlyContinue) { $cmdletAvailable = $true } }
+        "create" { if (Get-Command -Name "New-Service" -ErrorAction SilentlyContinue) { $cmdletAvailable = $true } }
+        "start"  { if (Get-Command -Name "Start-Service" -ErrorAction SilentlyContinue) { $cmdletAvailable = $true } }
+    }
+
+    # Try PowerShell cmdlets first
+    if ($cmdletAvailable) {
+        try {
+            switch ($Command) {
+                "query" {
+                    return (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue | Select-Object -First 1) -ne $null
+                }
+                "stop" {
+                    Stop-Service -Name $ServiceName -Force -ErrorAction Stop
+                    Write-Log "Service '${ServiceName}' stopped using cmdlet."
+                    return $true
+                }
+                "remove" {
+                    Remove-Service -Name $ServiceName -ErrorAction Stop
+                    Write-Log "Service '${ServiceName}' removed using cmdlet."
+                    return $true
+                }
+                "create" {
+                    New-Service -Name $ServiceName -DisplayName $DisplayName -Description $Description `
+                                -BinaryPathName $BinaryPathName -StartupType $StartupType -ErrorAction Stop
+                    Write-Log "Service '${ServiceName}' created using cmdlet."
+                    return $true
+                }
+                "start" {
+                    # Set-Service is not directly for start, but for StartupType; Start-Service is for immediate start
+                    # Also handles the case where service might be stopped already but we want to ensure it's running
+                    Set-Service -Name $ServiceName -StartupType $StartupType -ErrorAction SilentlyContinue # Ensure startup type is set
+                    Start-Service -Name $ServiceName -ErrorAction Stop
+                    Write-Log "Service '${ServiceName}' started using cmdlet."
+                    return $true
+                }
+            }
+        } catch {
+            $errorMessage = $_.Exception.Message
+            Write-Log "Cmdlet for service '$Command' failed for '${ServiceName}': $errorMessage. Falling back to sc.exe." "WARN"
+            # Fall through to sc.exe block
+        }
+    } else {
+        Write-Log "Cmdlet for service '$Command' not found. Falling back to sc.exe." "WARN"
+    }
+
+    # Fallback to sc.exe
+    try {
+        switch ($Command) {
+            "query" {
+                $scResult = (sc.exe query `"$ServiceName`" 2>&1)
+                return ($LASTEXITCODE -eq 0 -and $scResult -match "STATE") # Check if query successful and contains state
+            }
+            "stop" {
+                $scResult = (sc.exe stop `"$ServiceName`" 2>&1)
+                if ($LASTEXITCODE -eq 0 -or $scResult -match "STATE +: 1 +STOPPED") { # Check for success or already stopped
+                    Write-Log "Service '${ServiceName}' stopped using sc.exe."
+                    return $true
+                } else {
+                    throw "sc.exe stop command failed or service is not stopped: $scResult"
+                }
+            }
+            "remove" {
+                $scResult = (sc.exe delete `"$ServiceName`" 2>&1)
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Log "Service '${ServiceName}' deleted using sc.exe."
+                    return $true
+                } else {
+                    throw "sc.exe delete command failed: $scResult"
+                }
+            }
+            "create" {
+                $scResult = (sc.exe create `"$ServiceName`" binPath= `"$BinaryPathName`" DisplayName= `"$DisplayName`" start= `"$StartupType`" 2>&1)
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Log "Service '${ServiceName}' created using sc.exe."
+                    # Set description separately as part of create. sc.exe description command.
+                    & sc.exe description $ServiceName "$Description" | Out-Null
+                    return $true
+                } else {
+                    throw "sc.exe create command failed: $scResult"
+                }
+            }
+            "start" {
+                $scResult = (sc.exe start `"$ServiceName`" 2>&1)
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Log "Service '${ServiceName}' started using sc.exe."
+                    return $true
+                } else {
+                    throw "sc.exe start command failed: $scResult"
+                }
+            }
+            default {
+                Write-Log "Unsupported service command for sc.exe: $Command" "ERROR"
+                return $false
+            }
+        }
+    } catch {
+        $errorMessage = $_.Exception.Message
+        Write-Log "Final attempt with sc.exe for service '$Command' for '${ServiceName}' failed: $errorMessage" "ERROR"
+        return $false
+    }
+}
+
+
 function Restart-MiholessService {
     Param([string]$ServiceName = "MiholessService")
     Write-Log "Attempting to restart Miholess service..."
     try {
-        if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
-            Stop-Service -Name $ServiceName -Force -ErrorAction Stop
-            Start-Sleep -Seconds 2
-            Start-Service -Name $ServiceName -ErrorAction Stop
-            Write-Log "Miholess service restarted successfully."
-            return $true
+        if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $ServiceName) {
+            Write-Log "Service '${ServiceName}' found. Stopping..."
+            if (-not (Invoke-MiholessServiceCommand -Command "stop" -ServiceName $ServiceName)) {
+                Write-Log "Failed to stop service '${ServiceName}'. Cannot restart." "ERROR"
+                return $false
+            }
+            Start-Sleep -Seconds 2 # Give it time to fully stop
+            Write-Log "Starting service '${ServiceName}'..."
+            if (Invoke-MiholessServiceCommand -Command "start" -ServiceName $ServiceName) {
+                Write-Log "Miholess service restarted successfully."
+                return $true
+            } else {
+                Write-Log "Failed to start service '${ServiceName}'." "ERROR"
+                return $false
+            }
         } else {
-            Write-Log "Miholess service '${ServiceName}' not found. Cannot restart." "WARN" # <-- FIX: ${ServiceName}
+            Write-Log "Miholess service '${ServiceName}' not found. Cannot restart." "WARN"
             return $false
         }
     } catch {
-        # Store exception message in a variable to avoid parsing issues
         $errorMessage = $_.Exception.Message
         Write-Log "Failed to restart Miholess service: $errorMessage" "ERROR"
         return $false

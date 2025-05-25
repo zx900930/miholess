@@ -50,11 +50,12 @@ function Stop-MihomoProcess {
                 $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
                 if ($process -and $process.ProcessName -eq "mihomo" -and $process.Path -eq $MihomoExePath) {
                     Write-Log "Wrapper: Terminating Mihomo process with PID $pid."
+                    # Use Stop-Process directly here as it's for an arbitrary process, not a Windows Service.
                     $process | Stop-Process -Force
                     Remove-Item $PidFilePath -ErrorAction SilentlyContinue
                     Write-Log "Wrapper: Mihomo process stopped via PID file."
                 } else {
-                    Write-Log "Wrapper: No active Mihomo process found with PID $pid matching expected path ($MihomoExePath), or process name mismatch." "WARN"
+                    Write-Log "Wrapper: No active Mihomo process found with PID $pid matching expected path (${MihomoExePath}), or process name mismatch." "WARN"
                 }
             } catch {
                 $errorMessage = $_.Exception.Message

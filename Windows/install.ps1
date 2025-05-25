@@ -90,7 +90,7 @@ if ([string]::IsNullOrEmpty($RemoteConfigUrl)) { $RemoteConfigUrl = $Default_Rem
 Write-Log "Remote Config URL: $($RemoteConfigUrl -replace '^$', '<empty>')"
 
 # 7. Get Local Config Path
-$LocalConfigPath = Read-Host "Enter local configuration folder path (e.g., %USERPROFILE%\miholess_local_configs. Default: $Default_LocalConfigPath)"
+$LocalConfigPath = Read-Host "Enter local configuration folder path (e.g., %USERPROFILE%\my_configs. Default: $Default_LocalConfigPath)"
 if ([string]::IsNullOrEmpty($LocalConfigPath)) { $LocalConfigPath = $Default_LocalConfigPath }
 Write-Log "Local Config Path: $LocalConfigPath"
 
@@ -169,7 +169,7 @@ if (-not (Download-MihomoDataFiles -InstallationDir $MiholessInstallDir -GeoIpUr
     Write-Log "Some data files failed to download. Check logs for details." "WARN"
 }
 
-# 5. Download remaining scripts to installation directory
+# 5. Download remaining scripts to installation directory (by downloading from GitHub)
 Write-Log "Downloading remaining Miholess scripts to $MiholessInstallDir..."
 # helper_functions.ps1 is already downloaded and sourced
 $scriptsToDownload = @(
@@ -201,29 +201,41 @@ $serviceBinaryPath = "powershell.exe"
 $serviceArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$MiholessInstallDir\miholess_service_wrapper.ps1`""
 
 # Check if service exists and remove if Force is used
-if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
+if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $serviceName) {
     Write-Log "Service '$serviceName' already exists. Stopping and removing old service..." "WARN"
-    Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-    Remove-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if (-not (Invoke-MiholessServiceCommand -Command "stop" -ServiceName $serviceName)) {
+        Write-Log "Failed to stop existing service '$serviceName'. Attempting to remove anyway." "WARN"
+    }
+    if (-not (Invoke-MiholessServiceCommand -Command "remove" -ServiceName $serviceName)) {
+        Write-Log "Failed to remove existing service '$serviceName'. Installation aborted." "ERROR"
+        exit 1
+    }
     Start-Sleep -Seconds 2 # Give it a moment to clean up
 }
 
 Write-Log "Creating Windows Service '$serviceName'..."
 try {
-    New-Service -Name $serviceName -DisplayName $displayName -Description $description `
-                -BinaryPathName "$serviceBinaryPath $serviceArguments" `
-                -StartupType Automatic -ErrorAction Stop
+    if (-not (Invoke-MiholessServiceCommand -Command "create" -ServiceName $serviceName `
+                                            -DisplayName $displayName -Description $description `
+                                            -BinaryPathName "$serviceBinaryPath $serviceArguments" `
+                                            -StartupType "auto")) {
+        throw "Failed to create service using available methods."
+    }
     
     # Set service dependencies (e.g., depends on network being available)
-    # Using sc.exe for more robust dependency setting
+    # This specifically uses sc.exe as it's the reliable way for dependencies
     $dependCmd = "sc.exe config $serviceName depend= Nsi/TcpIp"
     Write-Log "Setting service dependency: $dependCmd"
     Invoke-Expression $dependCmd | Out-Null # Redirect output to null
 
-    Set-Service -Name $serviceName -Status Running -ErrorAction Stop # Start the service
+    if (-not (Invoke-MiholessServiceCommand -Command "start" -ServiceName $serviceName)) {
+        throw "Failed to start service using available methods."
+    }
+
     Write-Log "Windows Service '$serviceName' created and started successfully."
 } catch {
-    Write-Log "Failed to create or start Windows Service '$serviceName': $($_.Exception.Message)" "ERROR"
+    $errorMessage = $_.Exception.Message
+    Write-Log "Failed to create or start Windows Service '$serviceName': $errorMessage" "ERROR"
     exit 1
 }
 
@@ -257,7 +269,8 @@ function Register-MiholessScheduledTask {
         Register-ScheduledTask -Action $action -Trigger $Triggers -TaskName $TaskName -Description $Description -Settings $Settings -Force
         Write-Log "Scheduled task '$TaskName' registered successfully."
     } catch {
-        Write-Log "Failed to register scheduled task '$TaskName': $($_.Exception.Message)" "ERROR"
+        $errorMessage = $_.Exception.Message
+        Write-Log "Failed to register scheduled task '$TaskName': $errorMessage" "ERROR"
     }
 }
 

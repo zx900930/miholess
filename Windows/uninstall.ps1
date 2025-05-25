@@ -8,19 +8,15 @@ if (Test-Path $helperFunctionsPath) {
     . $helperFunctionsPath
 } else {
     # Fallback temporary logger if helper_functions.ps1 is missing
-    # This log path should NOT be dependent on $config.installation_dir as config might not be loaded yet
     $fallbackLogPath = "C:\ProgramData\miholess\bootstrap_updater_uninstall_fatal.log"
     try {
         "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [FATAL] (Updater/Uninstall) helper_functions.ps1 not found at $helperFunctionsPath. Cannot log properly. Exiting." | Out-File -FilePath $fallbackLogPath -Append -Encoding UTF8
     } catch {}
     exit 1 # Critical failure
 }
+# From this point, Write-Log is available.
 
-# --- Sourcing helper functions ---
-$PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
-. (Join-Path $PSScriptRoot "helper_functions.ps1")
-
-$MiholessInstallDir = "C:\ProgramData\miholess" # Default installation directory
+$MiholessInstallDir = "C:\ProgramData\miholess" # Default installation directory. Should match install.ps1 default.
 
 # Check for Administrator privileges
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -32,17 +28,19 @@ Write-Log "Starting Miholess uninstallation..."
 
 # 1. Stop and remove Windows Service
 $serviceName = "MiholessService"
-if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
-    Write-Log "Stopping service '$serviceName'..."
-    try {
-        Stop-Service -Name $serviceName -Force -ErrorAction Stop
-        Remove-Service -Name $serviceName -ErrorAction Stop
-        Write-Log "Service '$serviceName' removed successfully."
-    } catch {
-        Write-Log "Failed to stop or remove service '$serviceName': $($_.Exception.Message)" "ERROR"
+if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $serviceName) {
+    Write-Log "Stopping service '${serviceName}'..."
+    if (-not (Invoke-MiholessServiceCommand -Command "stop" -ServiceName $serviceName)) {
+        Write-Log "Failed to stop service '${serviceName}'. Attempting to remove anyway." "WARN"
+    }
+    Write-Log "Removing service '${serviceName}'..."
+    if (Invoke-MiholessServiceCommand -Command "remove" -ServiceName $serviceName) {
+        Write-Log "Service '${serviceName}' removed successfully."
+    } else {
+        Write-Log "Failed to remove service '${serviceName}'. Manual removal might be required." "ERROR"
     }
 } else {
-    Write-Log "Service '$serviceName' not found." "INFO"
+    Write-Log "Service '${serviceName}' not found." "INFO"
 }
 
 # 2. Unregister Scheduled Tasks
@@ -57,7 +55,8 @@ foreach ($taskName in $taskNames) {
             Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
             Write-Log "Scheduled task '$taskName' unregistered successfully."
         } catch {
-            Write-Log "Failed to unregister scheduled task '$taskName': $($_.Exception.Message)" "ERROR"
+            $errorMessage = $_.Exception.Message
+            Write-Log "Failed to unregister scheduled task '$taskName': $errorMessage" "ERROR"
         }
     } else {
         Write-Log "Scheduled task '$taskName' not found." "INFO"
@@ -71,7 +70,8 @@ if (Test-Path -Path $MiholessInstallDir) {
         Remove-Item -Path $MiholessInstallDir -Recurse -Force -ErrorAction Stop
         Write-Log "Installation directory removed successfully."
     } catch {
-        Write-Log "Failed to remove installation directory '$MiholessInstallDir': $($_.Exception.Message)" "ERROR"
+        $errorMessage = $_.Exception.Message
+        Write-Log "Failed to remove installation directory '$MiholessInstallDir': $errorMessage" "ERROR"
     }
 } else {
     Write-Log "Installation directory '$MiholessInstallDir' not found." "INFO"
