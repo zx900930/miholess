@@ -32,7 +32,6 @@ miholess/
 ├── LICENSE
 ├── config.example.json         # Example configuration file
 ├── Windows/
-│   ├── bootstrap_install.ps1   # Lightweight script to start interactive install
 │   ├── install.ps1             # Main interactive installation script
 │   ├── uninstall.ps1           # Uninstallation script
 │   ├── miholess_core_updater.ps1  # Script to update Mihomo core
@@ -68,14 +67,14 @@ The installation process is interactive and guided by the script. The following 
 Open **PowerShell as Administrator** and run the following command. The script will then prompt you for configuration details:
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/bootstrap_install.ps1 | iex
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex
 ```
 
 **Explanation of the one-liner:**
 
 - `Set-ExecutionPolicy Bypass -Scope Process -Force`: This temporarily sets the PowerShell execution policy to `Bypass` for the current PowerShell session (process), allowing the bootstrap script to run without security prompts. The `-Force` parameter suppresses the confirmation message.
 - `[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072`: This explicitly enables TLS 1.2 (value 3072) for web requests within the current session. This helps prevent issues when downloading files from HTTPS URLs, especially on older Windows versions.
-- `irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/bootstrap_install.ps1 | iex`: This downloads the lightweight `bootstrap_install.ps1` script content directly from GitHub using `Invoke-RestMethod` (`irm`) and immediately executes it using `Invoke-Expression` (`iex`). The `bootstrap_install.ps1` then takes over, downloading and running the main `install.ps1` script, and handling temporary files.
+- `irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex`: This downloads the lightweight `install.ps1` script content directly from GitHub using `Invoke-RestMethod` (`irm`) and immediately executes it using `Invoke-Expression` (`iex`). The `install.ps1` then takes over, downloading and running the main `install.ps1` script, and handling temporary files.
 
 **Interactive Setup Steps:**
 

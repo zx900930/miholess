@@ -1,510 +1,311 @@
-# Windows/helper_functions.ps1
+# Windows/install.ps1
+# This script performs the interactive installation. It is meant to be called by bootstrap_install.ps1.
 
-# Define a default log path for background scripts. This path will be used if a more specific path
-# from config.json cannot be determined (e.g., during early script startup).
-$global:MiholessDefaultServiceLogPath = "C:\ProgramData\miholess\miholess_service.log" # Native path for this fallback
+# --- Default Configuration Values (for interactive prompts) ---
+# Use forward slashes for all internal defaults and examples for JSON compatibility
+$Default_InstallDir = "C:/ProgramData/miholess"
+$Default_CoreMirror = "https://github.com/MetaCubeX/mihomo/releases/download/"
+$Default_GeoIpUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
+$Default_GeoSiteUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
+$Default_MmdbUrl = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
+$Default_RemoteConfigUrl = ""
+$Default_LocalConfigPath = "%USERPROFILE%/miholess_local_configs" # Changed to forward slashes
+$Default_MihomoPort = "7890"
 
-function Write-Log {
+# --- Define a basic Write-Log function temporarily for initial steps ---
+# This ensures logging works before helper_functions.ps1 is sourced
+function Write-Log-Temp {
     Param([string]$Message, [string]$Level = "INFO")
     $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logEntry = "[$Timestamp][$Level] $Message"
-    
-    # Always output to console for interactive debugging during installation
-    $logEntry | Out-Host
-    
-    # Determine the log file path for background logging
-    $targetLogFile = $global:MiholessDefaultServiceLogPath # Start with default fallback (native path)
-
-    # Attempt to get the log file path from a loaded configuration
-    # This requires the calling script (e.g., miholess_service_wrapper.ps1) to have loaded $config
-    # and potentially set $script:config for global access.
-    # We prioritize mihomo.log if it's explicitly set in config, otherwise use miholess_service.log.
-    try {
-        if ($script:config -and $script:config.log_file) {
-            # Use config.log_file, convert to native path for file system
-            $targetLogFile = $script:config.log_file.Replace('/', '\')
-        } elseif ($script:config -and $script:config.installation_dir) {
-            # Otherwise, use miholess_service.log within the installation directory, convert to native path
-            $targetLogFile = (Join-Path $script:config.installation_dir.Replace('/', '\') "miholess_service.log")
-        }
-    } catch {
-        # Ignore errors if config isn't available yet or is malformed.
-        # $targetLogFile will remain $global:MiholessDefaultServiceLogPath
-    }
-
-    # Ensure the directory for the log file exists
-    $logDir = Split-Path $targetLogFile -Parent
-    if (-not (Test-Path $logDir)) {
-        try {
-            New-Item -ItemType Directory -Path $logDir -ErrorAction Stop | Out-Null
-        } catch {
-            $errorMessage = $_.Exception.Message
-            "[$Timestamp][ERROR] Failed to create log directory ${logDir}: $errorMessage" | Out-Host
-            return # Skip file logging
-        }
-    }
-
-    # Write to the log file
-    try {
-        $logEntry | Out-File -FilePath $targetLogFile -Append -Encoding UTF8 -ErrorAction SilentlyContinue
-    } catch {
-        $errorMessage = $_.Exception.Message
-        "[$Timestamp][ERROR] Failed to write to log file ${targetLogFile}: $errorMessage" | Out-Host
-    }
+    "[$Timestamp][$Level] $Message" | Out-Host
 }
 
-function Get-MiholessConfig {
-    Param([string]$ConfigFilePath) # ConfigFilePath is already native path
-    if (-not (Test-Path -Path $ConfigFilePath)) {
-        Write-Log "Configuration file not found at ${ConfigFilePath}." "ERROR"
-        return $null
-    }
-    try {
-        $rawConfigContent = Get-Content -Path $ConfigFilePath | Out-String
-        # Environment variables are expanded here, but paths like C:/... should remain with /
-        $expandedConfigContent = [System.Environment]::ExpandEnvironmentVariables($rawConfigContent)
-        
-        $script:config = $expandedConfigContent | ConvertFrom-Json
-        return $script:config
-    } catch {
-        $errorMessage = $_.Exception.Message
-        Write-Log "Failed to read or parse configuration file: $errorMessage" "ERROR"
-        return $null
-    }
+Write-Log-Temp "Starting Miholess interactive installation..."
+
+# Check for Administrator privileges
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Log-Temp "This script must be run with Administrator privileges. Please restart PowerShell as Administrator." "ERROR"
+    exit 1
 }
 
-function Get-LatestMihomoDownloadUrl {
-    Param(
-        [string]$OsType = "windows",
-        [string]$Arch = "amd64",
-        [switch]$ExcludeGoVersions = $true,
-        [string]$BaseMirror = "https://github.com/MetaCubeX/mihomo/releases/download/"
-    )
-    Write-Log "Fetching latest Mihomo release info from GitHub API..."
-    $apiUrl = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+Write-Host "`n--- Miholess Configuration ---" -ForegroundColor Yellow
+Write-Host "Please provide values for the installation. Press Enter to use the default." -ForegroundColor Cyan
 
-    try {
-        $releaseInfo = Invoke-RestMethod -Uri $apiUrl -Method Get -ErrorAction Stop
-    } catch {
-        $errorMessage = $_.Exception.Message
-        Write-Log "Error fetching release info from GitHub API: $errorMessage" "ERROR"
-        return $null
-    }
-    Write-Log "DEBUG: API call successful for releases."
+# 1. Get Installation Directory
+$InstallDirInput = Read-Host "Enter installation directory (Default: $Default_InstallDir)"
+if ([string]::IsNullOrEmpty($InstallDirInput)) { $InstallDirInput = $Default_InstallDir }
+# Store forward-slashed path for JSON/config, and native path for file system operations
+$global:MiholessInstallDirJson = ([System.Environment]::ExpandEnvironmentVariables($InstallDirInput)).Replace('\', '/')
+$global:MiholessInstallDirNative = $global:MiholessInstallDirJson.Replace('/', '\')
+Write-Log-Temp "Installation Directory: ${global:MiholessInstallDirNative}" # Log native path
 
-    $tagName = $releaseInfo.tag_name
-    if (-not $tagName) {
-        Write-Log "Could not find tag_name in the latest release info." "ERROR"
-        return $null
-    }
-
-    $assets = $releaseInfo.assets
-    if (-not $assets) {
-        Write-Log "No assets found for the latest release." "ERROR"
-        return $null
-    }
-    Write-Log "DEBUG: Found $($assets.Count) assets."
-
-    $osArchPattern = "mihomo-${OsType}-${Arch}"
-    [System.Collections.ArrayList]$candidateUrls = @() 
-
-    foreach ($asset in $assets) {
-        $assetName = $asset.name
-        [string]$downloadUrl = $asset.browser_download_url 
-
-        if (-not $assetName -or -not $downloadUrl) {
-            continue
-        }
-
-        if ($assetName -notmatch $osArchPattern) {
-            continue
-        }
-
-        if ($ExcludeGoVersions -and ($assetName -match '-go\d+\b')) {
-            continue
-        }
-        
-        Write-Log "DEBUG: Candidate - Asset: ${assetName}, URL: ${downloadUrl}"
-
-        if ($assetName -match 'compatible') {
-            $candidateUrls.Insert(0, $downloadUrl) | Out-Null
-        } else {
-            $candidateUrls.Add($downloadUrl) | Out-Null
-        }
-    }
-
-    if ($candidateUrls.Count -eq 0) { 
-        Write-Log "No suitable Mihomo binary found for ${OsType}-${Arch} (excluding Go versions: ${ExcludeGoVersions})." "ERROR"
-        return $null
-    }
-    Write-Log "DEBUG: Found $($candidateUrls.Count) candidate URLs. First candidate: $($candidateUrls[0])"
-
-    $finalUrl = $candidateUrls[0]
-
-    if ($BaseMirror -ne "https://github.com/MetaCubeX/mihomo/releases/download/" -and $finalUrl -match "github.com/MetaCubeX/mihomo/releases/download/") {
-        $relativePath = $finalUrl -replace "https://github.com/MetaCubeX/mihomo/releases/download/", ""
-        $finalUrl = Join-Path -Path $BaseMirror -ChildPath $relativePath
-        Write-Log "Using custom mirror: ${BaseMirror}"
-    }
-    
-    Write-Log "DEBUG: Final URL before return: $finalUrl"
-    return $finalUrl
+# Ensure the installation directory exists before attempting to download helper functions into it
+if (-not (Test-Path -Path $global:MiholessInstallDirNative)) {
+    Write-Log-Temp "Creating installation directory: ${global:MiholessInstallDirNative}"
+    New-Item -ItemType Directory -Path $global:MiholessInstallDirNative | Out-Null
+} else {
+    Write-Log-Temp "Installation directory already exists. Proceeding with potential re-installation." "WARN"
 }
 
-function Download-AndExtractMihomo {
-    Param(
-        [string]$DownloadUrl,
-        [string]$DestinationDir # This param receives native path from install.ps1
-    )
-    Write-Log "Downloading Mihomo from $DownloadUrl"
-    $zipFile = Join-Path -Path $env:TEMP -ChildPath "mihomo_temp_$(Get-Random).zip" # Use native path
-
-    try {
-        Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipFile -ErrorAction Stop
-    } catch {
-        $errorMessage = $_.Exception.Message
-        Write-Log "Failed to download Mihomo: $errorMessage" "ERROR"
-        return $false
-    }
-
-    Write-Log "Extracting Mihomo to ${DestinationDir}"
-    try {
-        $targetExeName = "mihomo.exe"
-        $targetExePath = Join-Path $DestinationDir $targetExeName # Native path
-
-        if (Test-Path $targetExePath) { # Test-Path uses native path
-            Write-Log "Existing ${targetExeName} found. Attempting to stop process before replacing..." "WARN"
-            try {
-                Get-Process -Name "mihomo" -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Path -eq $targetExePath } | # Where-Object uses native path
-                    Stop-Process -Force -ErrorAction SilentlyContinue
-                Write-Log "Stopped existing mihomo process."
-                Start-Sleep -Seconds 1
-            } catch {
-                $errorMessage = $_.Exception.Message
-                Write-Log "Could not stop existing mihomo process. It might be in use: $errorMessage" "WARN"
-            }
-            Remove-Item $targetExePath -ErrorAction SilentlyContinue
-        }
-
-        Expand-Archive -LiteralPath $zipFile -DestinationPath $DestinationDir -Force # Native path
-        
-        $extractedExe = Get-ChildItem -Path $DestinationDir -Filter "mihomo*.exe" -Recurse | # Native path
-                        Where-Object { $_.Name -like "mihomo*${Arch}*.exe" -or $_.Name -eq "mihomo.exe" } |
-                        Select-Object -First 1
-
-        if ($extractedExe) {
-            if ($extractedExe.Name -ne $targetExeName -or $extractedExe.DirectoryName -ne $DestinationDir) {
-                Write-Log "Renaming and moving '${extractedExe.Name}' to '${targetExePath}'."
-                Move-Item -Path $extractedExe.FullName -Destination $targetExePath -Force # Native path
-                
-                $parentDir = $extractedExe.Directory
-                if ($parentDir.FullName -ne $DestinationDir -and (Get-ChildItem -Path $parentDir.FullName).Count -eq 0) { # Native path
-                    Remove-Item -Path $parentDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-                }
-            } else {
-                 Write-Log "Mihomo executable found as ${targetExeName} in ${DestinationDir}."
-            }
-        } else {
-            Write-Log "Could not find any mihomo executable (mihomo*.exe) after extraction in ${DestinationDir}." "ERROR"
-            return $false
-        }
-    } catch {
-        $errorMessage = $_.Exception.Message
-        Write-Log "Failed to extract Mihomo: $errorMessage" "ERROR"
-        return $false
-    } finally {
-        Remove-Item $zipFile -ErrorAction SilentlyContinue
-    }
-
-    Write-Log "Mihomo downloaded and extracted successfully."
-    return $true
+# --- Download helper_functions.ps1 and source it ---
+$helperFunctionsUrl = "https://raw.githubusercontent.com/zx900930/miholess/main/Windows/helper_functions.ps1"
+$helperFunctionsPath = Join-Path $global:MiholessInstallDirNative "helper_functions.ps1" # Use native path for download destination
+Write-Log-Temp "Downloading helper_functions.ps1 to ${helperFunctionsPath}..."
+try {
+    # Ensure TLS 1.2 is enabled for the download (redundant if bootstrap handles, but safe)
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+    (New-Object System.Net.WebClient).DownloadFile($helperFunctionsUrl, $helperFunctionsPath)
+    . $helperFunctionsPath # Source the downloaded helper functions (uses native path)
+    Write-Log "helper_functions.ps1 downloaded and sourced successfully."
+} catch {
+    Write-Log-Temp "Failed to download or source helper_functions.ps1: $($_.Exception.Message)" "ERROR"
+    exit 1
 }
 
-function Download-MihomoDataFiles {
-    Param(
-        [string]$InstallationDir, # This param receives native path from install.ps1
-        [string]$GeoIpUrl,
-        [string]$GeoSiteUrl,
-        [string]$MmdbUrl
-    )
-    Write-Log "Downloading data files..."
-    $dataFiles = @{
-        "geoip.dat" = $GeoIpUrl
-        "geosite.dat" = $GeoSiteUrl
-        "country.mmdb" = $MmdbUrl
-    }
-    $success = $true
-    foreach ($fileName in $dataFiles.Keys) {
-        $url = $dataFiles[$fileName]
-        $destination = Join-Path $InstallationDir $fileName # Native path
-        try {
-            Write-Log "Downloading ${fileName} from $url"
-            Invoke-WebRequest -Uri $url -OutFile $destination -ErrorAction Stop
-        } catch {
-            $errorMessage = $_.Exception.Message
-            Write-Log "Failed to download ${fileName}: $errorMessage" "WARN"
-            $success = $false
-        }
-    }
-    return $success
+# From this point onwards, use the Write-Log function from helper_functions.ps1
+# All other functions from helper_functions.ps1 are also now available.
+
+
+# --- Continue with Interactive Input using the proper Write-Log ---
+# 2. Get Mihomo Core Mirror
+$CoreMirror = Read-Host "Enter Mihomo core download mirror URL (Default: $Default_CoreMirror)"
+if ([string]::IsNullOrEmpty($CoreMirror)) { $CoreMirror = $Default_CoreMirror }
+Write-Log "Mihomo Core Mirror: $CoreMirror"
+
+# 3. Get GeoIP URL
+$GeoIpUrl = Read-Host "Enter GeoIP.dat download URL (Default: $Default_GeoIpUrl)"
+if ([string]::IsNullOrEmpty($GeoIpUrl)) { $GeoIpUrl = $Default_GeoIpUrl }
+Write-Log "GeoIP URL: $GeoIpUrl"
+
+# 4. Get GeoSite URL
+$GeoSiteUrl = Read-Host "Enter GeoSite.dat download URL (Default: $Default_GeoSiteUrl)"
+if ([string]::IsNullOrEmpty($GeoSiteUrl)) { $GeoSiteUrl = $Default_GeoSiteUrl }
+Write-Log "GeoSite URL: $GeoSiteUrl"
+
+# 5. Get MMDB URL
+$MmdbUrl = Read-Host "Enter Country.mmdb download URL (Default: $Default_MmdbUrl)"
+if ([string]::IsNullOrEmpty($MmdbUrl)) { $MmdbUrl = $Default_MmdbUrl }
+Write-Log "MMDB URL: $MmdbUrl"
+
+# 6. Get Remote Config URL
+$RemoteConfigUrl = Read-Host "Enter remote configuration URL (Leave empty to use local config.yaml. Default: <empty>)"
+if ([string]::IsNullOrEmpty($RemoteConfigUrl)) { $RemoteConfigUrl = $Default_RemoteConfigUrl }
+Write-Log "Remote Config URL: $($RemoteConfigUrl -replace '^$', '<empty>')"
+
+# 7. Get Local Config Path
+$LocalConfigPathInput = Read-Host "Enter local configuration folder path (e.g., %USERPROFILE%/my_configs. Default: $($Default_LocalConfigPath))"
+if ([string]::IsNullOrEmpty($LocalConfigPathInput)) { $LocalConfigPathInput = $Default_LocalConfigPath }
+# Store forward-slashed path for JSON/config, and native path for file system operations
+$global:MiholessLocalConfigPathJson = ([System.Environment]::ExpandEnvironmentVariables($LocalConfigPathInput)).Replace('\', '/')
+$global:MiholessLocalConfigPathNative = $global:MiholessLocalConfigPathJson.Replace('/', '\')
+Write-Log "Local Config Path: ${global:MiholessLocalConfigPathNative}" # Log native path
+
+# 8. Get Mihomo Port
+$MihomoPort = Read-Host "Enter Mihomo listen port (Default: $Default_MihomoPort)"
+if ([string]::IsNullOrEmpty($MihomoPort)) { $MihomoPort = $Default_MihomoPort }
+Write-Log "Mihomo Port: $MihomoPort"
+
+# 9. Force Re-installation
+$ForceInput = Read-Host "Force re-installation if Miholess already exists? (Y/N, Default: N)"
+$Force = ($ForceInput -eq 'Y' -or $ForceInput -eq 'y')
+Write-Log "Force Re-installation: $Force"
+
+Write-Host "`n--- Installation Summary ---" -ForegroundColor Yellow
+Write-Host "Installation Directory: ${global:MiholessInstallDirNative}"
+Write-Host "Mihomo Core Mirror: $CoreMirror"
+Write-Host "GeoIP URL: $GeoIpUrl"
+Write-Host "GeoSite URL: $GeoSiteUrl"
+Write-Host "MMDB URL: $MmdbUrl"
+Write-Host "Remote Config URL: $($RemoteConfigUrl -replace '^$', '<empty>') (Will be downloaded to ${global:MiholessLocalConfigPathNative}\config.yaml)"
+Write-Host "Local Config Path: ${global:MiholessLocalConfigPathNative} (Mihomo data directory)"
+Write-Host "Mihomo Port: $MihomoPort"
+Write-Host "Force Re-installation: $Force"
+Write-Host "`nPress Enter to proceed with installation, or Ctrl+C to cancel." -ForegroundColor Green
+Pause | Out-Null # Wait for user to press enter
+
+# --- Populate final configuration hashtable ---
+# All paths in this hashtable use forward slashes for JSON safety
+$ConfigToSave = @{
+    installation_dir = $global:MiholessInstallDirJson
+    mihomo_core_mirror = $CoreMirror
+    geoip_url = $GeoIpUrl
+    geosite_url = $GeoSiteUrl
+    mmdb_url = $MmdbUrl
+    remote_config_url = $RemoteConfigUrl
+    local_config_path = $global:MiholessLocalConfigPathJson
+    log_file = "${global:MiholessInstallDirJson}/mihomo.log"
+    pid_file = "${global:MiholessInstallDirJson}/mihomo.pid"
+    mihomo_port = $MihomoPort
 }
 
+$MiholessServiceAccount = "NT AUTHORITY\System" # Remains constant
 
-function Invoke-MiholessServiceCommand {
-    Param(
-        [string]$Command, # Valid commands: "query", "stop", "remove", "create", "start"
-        [string]$ServiceName,
-        [string]$DisplayName = "",
-        [string]$Description = "",
-        [string]$BinaryPathName = "", # For create command (expected native path)
-        [string]$StartupType = "auto" # "auto", "demand", "disabled" for create command
-    )
-
-    Write-Log "Attempting service '${Command}' for '${ServiceName}'..." # Using ${} here for safety
-
-    # Check for cmdlet availability
-    $cmdletAvailable = $false
-    switch ($Command) {
-        "query"  { if (Get-Command -Name "Get-Service" -ErrorAction SilentlyContinue) { $cmdletAvailable = $true } }
-        "stop"   { if (Get-Command -Name "Stop-Service" -ErrorAction SilentlyContinue) { $cmdletAvailable = $true } }
-        "remove" { if (Get-Command -Name "Remove-Service" -ErrorAction SilentlyContinue) { $cmdletAvailable = $true } }
-        "create" { if (Get-Command -Name "New-Service" -ErrorAction SilentlyContinue) { $cmdletAvailable = $true } }
-        "start"  { if (Get-Command -Name "Start-Service" -ErrorAction SilentlyContinue) { $cmdletAvailable = $true } }
-    }
-
-    # Try PowerShell cmdlets first
-    if ($cmdletAvailable) {
-        try {
-            switch ($Command) {
-                "query" {
-                    return (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue | Select-Object -First 1) -ne $null
-                }
-                "stop" {
-                    Stop-Service -Name $ServiceName -Force -ErrorAction Stop
-                    Write-Log "Service '${ServiceName}' stopped using cmdlet."
-                    return $true
-                }
-                "remove" {
-                    Remove-Service -Name $ServiceName -ErrorAction Stop
-                    Write-Log "Service '${ServiceName}' deleted using cmdlet. Waiting for full removal..."
-                    # --- FIX: Poll until service is truly gone ---
-                    $maxWaitSeconds = 30 # Max wait time for service to disappear
-                    $intervalSeconds = 2 # Check every 2 seconds
-                    $waitedSeconds = 0
-                    do {
-                        Start-Sleep -Seconds $intervalSeconds
-                        $waitedSeconds += $intervalSeconds
-                        $serviceExists = (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue | Select-Object -First 1) -ne $null
-                        if ($serviceExists) {
-                            Write-Log "Service '${ServiceName}' still detected. Waited ${waitedSeconds}s..." "DEBUG"
-                        }
-                    } while ($serviceExists -and $waitedSeconds -lt $maxWaitSeconds)
-
-                    if (-not $serviceExists) {
-                        Write-Log "Service '${ServiceName}' confirmed fully removed after ${waitedSeconds}s."
-                        return $true
-                    } else {
-                        Write-Log "Service '${ServiceName}' still detected after ${maxWaitSeconds}s timeout. Manual reboot might be required." "ERROR"
-                        return $false
-                    }
-                    # --- END FIX ---
-                }
-                "create" {
-                    New-Service -Name $ServiceName -DisplayName $DisplayName -Description $Description `
-                                -BinaryPathName $BinaryPathName -StartupType $StartupType -ErrorAction Stop
-                    Write-Log "Service '${ServiceName}' created using cmdlet."
-                    return $true
-                }
-                "start" {
-                    Set-Service -Name $ServiceName -StartupType $StartupType -ErrorAction SilentlyContinue
-                    Start-Service -Name $ServiceName -ErrorAction Stop
-                    Write-Log "Service '${ServiceName}' started using cmdlet."
-                    return $true
-                }
-            }
-        } catch {
-            $errorMessage = $_.Exception.Message
-            Write-Log "Cmdlet for service '${Command}' failed for '${ServiceName}': $errorMessage. Falling back to sc.exe." "WARN"
-            # Fall through to sc.exe block
-        }
+# 1. (Re-check) Create installation directory - now using $global:MiholessInstallDirNative
+if (-not (Test-Path -Path $global:MiholessInstallDirNative)) {
+    Write-Log "Creating installation directory: ${global:MiholessInstallDirNative} (Safety check)"
+    New-Item -ItemType Directory -Path $global:MiholessInstallDirNative | Out-Null
+} else {
+    if ($Force) {
+        Write-Log "Installation directory already exists. Forcing re-installation (confirmed)."
     } else {
-        Write-Log "Cmdlet for service '${Command}' not found. Falling back to sc.exe." "WARN"
+        Write-Log "Installation directory already exists and not forcing re-installation. Exiting." "ERROR"
+        exit 1
     }
+}
 
-    # Fallback to sc.exe
+# 2. Save configuration to JSON file
+$ConfigFilePath = Join-Path $global:MiholessInstallDirNative "config.json" # Use native path for file system
+Write-Log "Saving configuration to ${ConfigFilePath}"
+$ConfigToSave | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFilePath -Encoding UTF8
+
+# 3. Download and Extract Mihomo Core
+$mihomoDownloadUrl = Get-LatestMihomoDownloadUrl -OsType "windows" -Arch "amd64" -BaseMirror $CoreMirror
+if ($null -eq $mihomoDownloadUrl) {
+    Write-Log "Failed to get Mihomo download URL. Installation aborted." "ERROR"
+    exit 1
+}
+
+# Pass native path for DestinationDir
+if (-not (Download-AndExtractMihomo -DownloadUrl $mihomoDownloadUrl -DestinationDir $global:MiholessInstallDirNative)) {
+    Write-Log "Failed to download and extract Mihomo. Installation aborted." "ERROR"
+    exit 1
+}
+
+# 4. Download GeoIP, GeoSite, MMDB files
+# Pass native path for InstallationDir
+if (-not (Download-MihomoDataFiles -InstallationDir $global:MiholessInstallDirNative -GeoIpUrl $GeoIpUrl -GeoSiteUrl $GeoSiteUrl -MmdbUrl $MmdbUrl)) {
+    Write-Log "Some data files failed to download. Check logs for details." "WARN"
+}
+
+# 5. Download remaining scripts to installation directory (by downloading from GitHub)
+Write-Log "Downloading remaining Miholess scripts to ${global:MiholessInstallDirNative}..."
+# helper_functions.ps1 is already downloaded and sourced
+$scriptsToDownload = @(
+    "miholess_core_updater.ps1",
+    "miholess_config_updater.ps1",
+    "miholess_service_wrapper.ps1",
+    "miholess.ps1",
+    "uninstall.ps1" # Ensure uninstall script is present
+)
+foreach ($script in $scriptsToDownload) {
+    $sourceUrl = "https://raw.githubusercontent.com/zx900930/miholess/main/Windows/$script"
+    # Ensure destPath uses system native backslashes for file operation
+    $destPath = (Join-Path $global:MiholessInstallDirNative $script)
+    Write-Log "Downloading '${script}' from '${sourceUrl}' to '${destPath}'..."
     try {
-        switch ($Command) {
-            "query" {
-                $scResult = (sc.exe query `"$ServiceName`" 2>&1)
-                return ($LASTEXITCODE -eq 0 -and $scResult -match "STATE") # Check if query successful and contains state
-            }
-            "stop" {
-                $scResult = (sc.exe stop `"$ServiceName`" 2>&1)
-                if ($LASTEXITCODE -eq 0 -or $scResult -match "STATE +: 1 +STOPPED") {
-                    Write-Log "Service '${ServiceName}' stopped using sc.exe."
-                    return $true
-                } else {
-                    throw "sc.exe stop command failed or service is not stopped: $scResult"
-                }
-            }
-            "remove" {
-                $scResult = (sc.exe delete `"$ServiceName`" 2>&1)
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Log "Service '${ServiceName}' deleted using sc.exe. Waiting for full removal..."
-                    # --- FIX: Poll until service is truly gone using sc.exe query ---
-                    $maxWaitSeconds = 30 # Max wait time for service to disappear
-                    $intervalSeconds = 2 # Check every 2 seconds
-                    $waitedSeconds = 0
-                    do {
-                        Start-Sleep -Seconds $intervalSeconds
-                        $waitedSeconds += $intervalSeconds
-                        $scQueryOutput = (sc.exe query `"$ServiceName`" 2>&1)
-                        # Service exists if query successful and contains STATE (not ERROR 1060: The specified service does not exist)
-                        $serviceExists = ($LASTEXITCODE -eq 0 -and $scQueryOutput -match "STATE") 
-                        if ($serviceExists) {
-                            Write-Log "Service '${ServiceName}' still detected via sc.exe. Waited ${waitedSeconds}s..." "DEBUG"
-                        }
-                    } while ($serviceExists -and $waitedSeconds -lt $maxWaitSeconds)
-
-                    if (-not $serviceExists) {
-                        Write-Log "Service '${ServiceName}' confirmed fully removed after ${waitedSeconds}s."
-                        return $true
-                    } else {
-                        Write-Log "Service '${ServiceName}' still detected via sc.exe after ${maxWaitSeconds}s timeout. Manual reboot might be required." "ERROR"
-                        return $false
-                    }
-                    # --- END FIX ---
-                } else {
-                    throw "sc.exe delete command failed: $scResult"
-                }
-            }
-            "create" {
-                $scResult = (sc.exe create `"$ServiceName`" binPath= `"$BinaryPathName`" DisplayName= `"$DisplayName`" start= `"$StartupType`" 2>&1)
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Log "Service '${ServiceName}' created using sc.exe."
-                    & sc.exe description $ServiceName "$Description" | Out-Null
-                    return $true
-                } else {
-                    throw "sc.exe create command failed: $scResult"
-                }
-            }
-            "start" {
-                $scResult = (sc.exe start `"$ServiceName`" 2>&1)
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Log "Service '${ServiceName}' started using sc.exe."
-                    return $true
-                } else {
-                    throw "sc.exe start command failed: $scResult"
-                }
-            }
-            default {
-                Write-Log "Unsupported service command for sc.exe: ${Command}" "ERROR"
-                return $false
-            }
-        }
+        (New-Object System.Net.WebClient).DownloadFile($sourceUrl, $destPath)
+        Write-Log "Downloaded '${script}'."
     } catch {
         $errorMessage = $_.Exception.Message
-        Write-Log "Final attempt with sc.exe for service '${Command}' for '${ServiceName}' failed: $errorMessage" "ERROR"
-        return $false
+        Write-Log "Warning: Failed to download '${script}' from '${sourceUrl}': $errorMessage. Skipping." "WARN"
     }
 }
 
 
-function Restart-MiholessService {
-    Param([string]$ServiceName = "MiholessService")
-    Write-Log "Attempting to restart Miholess service..."
-    try {
-        if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $ServiceName) {
-            Write-Log "Service '${ServiceName}' found. Stopping..."
-            if (-not (Invoke-MiholessServiceCommand -Command "stop" -ServiceName $ServiceName)) {
-                Write-Log "Failed to stop service '${ServiceName}'. Cannot restart." "ERROR"
-                return $false
-            }
-            Start-Sleep -Seconds 2 # Give it time to fully stop
-            Write-Log "Starting service '${ServiceName}'..."
-            if (Invoke-MiholessServiceCommand -Command "start" -ServiceName $ServiceName) {
-                Write-Log "Miholess service restarted successfully."
-                return $true
-            } else {
-                Write-Log "Failed to start service '${ServiceName}'." "ERROR"
-                return $false
-            }
-        } else {
-            Write-Log "Miholess service '${ServiceName}' not found. Cannot restart." "WARN"
-            return $false
-        }
-    } catch {
-        $errorMessage = $_.Exception.Message
-        Write-Log "Failed to restart Miholess service: $errorMessage" "ERROR"
-        return $false
+# 6. Create Windows Service
+$serviceName = "MiholessService"
+$displayName = "Miholess Core Service"
+$description = "Manages Mihomo core and configurations, ensures autostart."
+# Service binary path must use native system backslashes
+$serviceBinaryPath = "powershell.exe"
+$serviceWrapperScriptPath = (Join-Path $global:MiholessInstallDirNative "miholess_service_wrapper.ps1") # Native path
+$serviceArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$serviceWrapperScriptPath`""
+
+# Check if service exists and remove if Force is used
+if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $serviceName) {
+    Write-Log "Service '${serviceName}' already exists. Stopping and removing old service..." "WARN"
+    if (-not (Invoke-MiholessServiceCommand -Command "stop" -ServiceName $serviceName)) {
+        Write-Log "Failed to stop existing service '${serviceName}'. Attempting to remove anyway." "WARN"
     }
+    if (-not (Invoke-MiholessServiceCommand -Command "remove" -ServiceName $serviceName)) {
+        Write-Log "Failed to remove existing service '${serviceName}'. Installation aborted." "ERROR"
+        exit 1
+    }
+    Start-Sleep -Seconds 2 # Give it a moment to clean up
 }
 
-function Update-MihomoMainConfig {
+Write-Log "Creating Windows Service '${serviceName}'..."
+try {
+    if (-not (Invoke-MiholessServiceCommand -Command "create" -ServiceName $serviceName `
+                                            -DisplayName $displayName -Description $description `
+                                            -BinaryPathName "$serviceBinaryPath $serviceArguments" `
+                                            -StartupType "auto")) {
+        throw "Failed to create service using available methods."
+    }
+    
+    # Set service dependencies (e.g., depends on network being available)
+    # This specifically uses sc.exe as it's the reliable way for dependencies
+    $dependCmd = "sc.exe config $serviceName depend= Nsi/TcpIp"
+    Write-Log "Setting service dependency: $dependCmd"
+    Invoke-Expression $dependCmd | Out-Null # Redirect output to null
+
+    if (-not (Invoke-MiholessServiceCommand -Command "start" -ServiceName $serviceName)) {
+        throw "Failed to start service using available methods."
+    }
+
+    Write-Log "Windows Service '${serviceName}' created and started successfully."
+} catch {
+    $errorMessage = $_.Exception.Message
+    Write-Log "Failed to create or start Windows Service '${serviceName}': $errorMessage" "ERROR"
+    exit 1
+}
+
+
+# 7. Create Scheduled Tasks
+Write-Log "Creating scheduled tasks..."
+
+# Function to safely register a scheduled task (local to install.ps1 as it's not in helper_functions yet)
+# Note: This function should ideally be in helper_functions.ps1
+# However, due to the order of operations (install script defines, then calls),
+# it's safer to keep it here or ensure proper sourcing.
+# Since helper_functions.ps1 is sourced *before* this function is called,
+# it could theoretically be moved there. But for simplicity and self-containment
+# within the installer's logic flow, it remains here.
+function Register-MiholessScheduledTask {
     Param(
-        [string]$RemoteConfigUrl,
-        [string]$LocalConfigPath # This param receives native path
+        [string]$TaskName,
+        [string]$Description,
+        [string]$ScriptPath, # Path received here is forward-slashed from config
+        [ScheduledTaskTrigger[]]$Triggers,
+        [ScheduledTaskSettingsSet]$Settings
     )
-    Write-Log "Updating Mihomo main configuration from remote URL..."
-
-    if ([string]::IsNullOrEmpty($RemoteConfigUrl)) {
-        Write-Log "No remote configuration URL provided. Skipping config update." "INFO"
-        return $false
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        Write-Log "Scheduled task '${TaskName}' already exists. Removing old task..." "WARN"
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
     }
-    # Test-Path uses native path
-    if (-not (Test-Path -Path $LocalConfigPath)) {
-        Write-Log "Local config directory not found: ${LocalConfigPath}. Creating it." "INFO"
-        try {
-            New-Item -ItemType Directory -Path $LocalConfigPath -ErrorAction Stop | Out-Null
-        } catch {
-            $errorMessage = $_.Exception.Message
-            Write-Log "Failed to create local config directory: $errorMessage" "ERROR"
-            return $false
-        }
-    }
-
-    $targetConfigFilePath = Join-Path $LocalConfigPath "config.yaml" # Target path is native
-    Write-Log "Downloading remote config from: ${RemoteConfigUrl} to ${targetConfigFilePath}"
-
-
-    $newConfigContent = $null
+    Write-Log "Registering scheduled task '${TaskName}'..."
     try {
-        $newConfigContent = Invoke-WebRequest -Uri $RemoteConfigUrl -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content
+        # ScriptPath for scheduled task needs system native backslashes
+        $scriptPathLocal = $ScriptPath.Replace('/', '\')
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPathLocal`""
+        Register-ScheduledTask -Action $action -Trigger $Triggers -TaskName $TaskName -Description $Description -Settings $Settings -Force
+        Write-Log "Scheduled task '${TaskName}' registered successfully."
     } catch {
         $errorMessage = $_.Exception.Message
-        Write-Log "Failed to download remote config from ${RemoteConfigUrl}: $errorMessage" "ERROR"
-        return $false
-    }
-
-    if ([string]::IsNullOrEmpty($newConfigContent)) {
-        Write-Log "Downloaded remote config is empty. Not updating existing config." "WARN"
-        return $false
-    }
-
-    $existingConfigContent = ""
-    if (Test-Path $targetConfigFilePath) { # Test-Path uses native path
-        try {
-            $existingConfigContent = (Get-Content -Path $targetConfigFilePath | Out-String).Trim()
-        } catch {
-            $errorMessage = $_.Exception.Message
-            Write-Log "Failed to read existing config at ${targetConfigFilePath}: $errorMessage" "WARN"
-        }
-    }
-
-    if ($newConfigContent.Trim() -ne $existingConfigContent) {
-        Write-Log "Configuration content changed. Saving new config..."
-        try {
-            $newConfigContent | Out-File -FilePath $targetConfigFilePath -Encoding UTF8 -Force # Out-File uses native path
-            Write-Log "Main Mihomo config saved to $targetConfigFilePath"
-            return $true # Indicates a change was made
-        } catch {
-            $errorMessage = $_.Exception.Message
-            Write-Log "Failed to save final Mihomo config: $errorMessage" "ERROR"
-            return $false
-        }
-    } else {
-        Write-Log "Configuration content is identical. No change needed."
-        return $false # Indicates no change
+        Write-Log "Failed to register scheduled task '${TaskName}': $errorMessage" "ERROR"
     }
 }
+
+$commonSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -StopIfGoingOnBatteries:$false -DontStopIfGoingOnBatteries -AllowStartOnDemand -Enabled -RunOnlyIfNetworkAvailable
+
+# Task: Mihomo Core Updater
+# Path for scheduled task uses forward slashes, will be converted by Register-MiholessScheduledTask
+$scriptCorePath = "${global:MiholessInstallDirJson}/miholess_core_updater.ps1"
+Register-MiholessScheduledTask -TaskName $taskNameCore -Description "Updates Mihomo core to the latest non-Go version." `
+    -ScriptPath $scriptCorePath -Triggers $triggerCore -Settings $commonSettings
+
+# Task: Mihomo Config Updater
+# Path for scheduled task uses forward slashes, will be converted by Register-MiholessScheduledTask
+$scriptConfigPath = "${global:MiholessInstallDirJson}/miholess_config_updater.ps1"
+# Run every hour starting at midnight, duration 1 day (meaning it will run for 24 hours, then then repeat daily)
+$triggerConfig = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 1) -At "00:00" 
+Register-MiholessScheduledTask -TaskName $taskNameConfig -Description "Updates Mihomo remote and local configurations." `
+    -ScriptPath $scriptConfigPath -Triggers $triggerConfig -Settings $commonSettings
+
+Write-Log "Scheduled tasks created successfully."
+
+Write-Log "Miholess installation completed successfully!"
+Write-Log "You can check service status with: Get-Service MiholessService"
+Write-Log "And scheduled tasks with: Get-ScheduledTask -TaskName Miholess_*"
+Write-Log "To configure, edit: ${ConfigFilePath}" # ConfigFilePath is already native, safe to use
