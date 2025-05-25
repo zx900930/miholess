@@ -137,41 +137,50 @@ function Download-AndExtractMihomo {
 
     Write-Log "Extracting Mihomo to $DestinationDir"
     try {
-        # Ensure target executable is not in use before extraction
-        $mihomoExePath = Join-Path $DestinationDir "mihomo.exe"
-        if (Test-Path $mihomoExePath) {
-            Write-Log "Existing mihomo.exe found. Attempting to stop process before replacing..." "WARN"
+        $targetExeName = "mihomo.exe"
+        $targetExePath = Join-Path $DestinationDir $targetExeName
+
+        # Stop existing mihomo process if it's running from the target path
+        if (Test-Path $targetExePath) {
+            Write-Log "Existing ${targetExeName} found. Attempting to stop process before replacing..." "WARN"
             try {
-                $process = Get-Process -Name "mihomo" -ErrorAction SilentlyContinue
-                if ($process) {
-                    $process | Stop-Process -Force -ErrorAction SilentlyContinue
-                    Write-Log "Stopped existing mihomo process."
-                    Start-Sleep -Seconds 1
-                }
+                Get-Process -Name "mihomo" -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Path -eq $targetExePath } |
+                    Stop-Process -Force -ErrorAction SilentlyContinue
+                Write-Log "Stopped existing mihomo process."
+                Start-Sleep -Seconds 1
             } catch {
-                # Store exception message in a variable to avoid parsing issues
                 $errorMessage = $_.Exception.Message
                 Write-Log "Could not stop existing mihomo process. It might be in use: $errorMessage" "WARN"
             }
-            Remove-Item $mihomoExePath -ErrorAction SilentlyContinue
+            Remove-Item $targetExePath -ErrorAction SilentlyContinue
         }
 
+        # Expand the archive
         Expand-Archive -LiteralPath $zipFile -DestinationPath $DestinationDir -Force
-        # Find the actual Mihomo executable after extraction (might be in a subdir)
-        $mihomoExe = Get-ChildItem -Path $DestinationDir -Filter "mihomo.exe" -Recurse | Select-Object -First 1
-        if ($mihomoExe) {
-            # If it's not directly in the destination dir, move it up
-            if ($mihomoExe.DirectoryName -ne $DestinationDir) {
-                Write-Log "Moving mihomo.exe from $($mihomoExe.DirectoryName) to $DestinationDir"
-                Move-Item -Path $mihomoExe.FullName -Destination (Join-Path $DestinationDir "mihomo.exe") -Force
-                # Clean up empty subdirectories if any
-                $parentDir = $mihomoExe.Directory
-                if ((Get-ChildItem -Path $parentDir.FullName).Count -eq 0) {
+
+        # Find the actual Mihomo executable after extraction
+        # It might be named mihomo-windows-amd64-compatible.exe or mihomo.exe directly
+        $extractedExe = Get-ChildItem -Path $DestinationDir -Filter "mihomo*.exe" -Recurse |
+                        Where-Object { $_.Name -like "mihomo*${Arch}*.exe" -or $_.Name -eq "mihomo.exe" } |
+                        Select-Object -First 1
+
+        if ($extractedExe) {
+            # If the found executable is not already named mihomo.exe and not in the root
+            if ($extractedExe.Name -ne $targetExeName -or $extractedExe.DirectoryName -ne $DestinationDir) {
+                Write-Log "Renaming and moving '${extractedExe.Name}' to '${targetExePath}'."
+                Move-Item -Path $extractedExe.FullName -Destination $targetExePath -Force
+                
+                # Clean up empty parent directories if it was moved from a subfolder
+                $parentDir = $extractedExe.Directory
+                if ($parentDir.FullName -ne $DestinationDir -and (Get-ChildItem -Path $parentDir.FullName).Count -eq 0) {
                     Remove-Item -Path $parentDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
                 }
+            } else {
+                 Write-Log "Mihomo executable found as ${targetExeName} in ${DestinationDir}."
             }
         } else {
-            Write-Log "Could not find mihomo.exe after extraction." "ERROR"
+            Write-Log "Could not find any mihomo executable (mihomo*.exe) after extraction in $DestinationDir." "ERROR"
             return $false
         }
     } catch {
