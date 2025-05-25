@@ -1,4 +1,5 @@
 # Windows/install.ps1
+# This script performs the interactive installation. It is meant to be called by bootstrap_install.ps1.
 
 # --- Default Configuration Values (for interactive prompts) ---
 $Default_InstallDir = "C:\ProgramData\miholess"
@@ -40,7 +41,7 @@ if (-not (Test-Path -Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir | Out-Null
 } else {
     # If it exists, we still allow to proceed to download helper functions
-    Write-Log-Temp "Installation directory already exists. Proceeding..." "WARN"
+    Write-Log-Temp "Installation directory already exists. Proceeding with potential re-installation." "WARN"
 }
 
 # --- Download helper_functions.ps1 and source it ---
@@ -48,7 +49,7 @@ $helperFunctionsUrl = "https://raw.githubusercontent.com/zx900930/miholess/main/
 $helperFunctionsPath = Join-Path $InstallDir "helper_functions.ps1"
 Write-Log-Temp "Downloading helper_functions.ps1 to $helperFunctionsPath..."
 try {
-    # Ensure TLS 1.2 is enabled for the download
+    # Ensure TLS 1.2 is enabled for the download (redundant if bootstrap handles, but safe)
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
     (New-Object System.Net.WebClient).DownloadFile($helperFunctionsUrl, $helperFunctionsPath)
     . $helperFunctionsPath # Source the downloaded helper functions
@@ -89,7 +90,7 @@ if ([string]::IsNullOrEmpty($RemoteConfigUrl)) { $RemoteConfigUrl = $Default_Rem
 Write-Log "Remote Config URL: $($RemoteConfigUrl -replace '^$', '<empty>')"
 
 # 7. Get Local Config Path
-$LocalConfigPath = Read-Host "Enter local configuration folder path (e.g., %USERPROFILE%\my_configs. Default: $Default_LocalConfigPath)"
+$LocalConfigPath = Read-Host "Enter local configuration folder path (e.g., %USERPROFILE%\miholess_local_configs. Default: $Default_LocalConfigPath)"
 if ([string]::IsNullOrEmpty($LocalConfigPath)) { $LocalConfigPath = $Default_LocalConfigPath }
 Write-Log "Local Config Path: $LocalConfigPath"
 
@@ -168,7 +169,7 @@ if (-not (Download-MihomoDataFiles -InstallationDir $MiholessInstallDir -GeoIpUr
     Write-Log "Some data files failed to download. Check logs for details." "WARN"
 }
 
-# 5. Copy remaining scripts to installation directory (by downloading from GitHub)
+# 5. Download remaining scripts to installation directory
 Write-Log "Downloading remaining Miholess scripts to $MiholessInstallDir..."
 # helper_functions.ps1 is already downloaded and sourced
 $scriptsToDownload = @(
@@ -176,13 +177,14 @@ $scriptsToDownload = @(
     "miholess_config_updater.ps1",
     "miholess_service_wrapper.ps1",
     "miholess.ps1",
-    "uninstall.ps1" # Add uninstall script to ensure it's always in the install dir
+    "uninstall.ps1" # Ensure uninstall script is present
 )
 foreach ($script in $scriptsToDownload) {
     $sourceUrl = "https://raw.githubusercontent.com/zx900930/miholess/main/Windows/$script"
     $destPath = Join-Path $MiholessInstallDir $script
     Write-Log "Downloading '$script' from '$sourceUrl'..."
     try {
+        # Using WebClient directly for reliability, as irm/iex might have issues with large content or specific URLs
         (New-Object System.Net.WebClient).DownloadFile($sourceUrl, $destPath)
         Write-Log "Downloaded '$script'."
     } catch {
@@ -230,6 +232,12 @@ try {
 Write-Log "Creating scheduled tasks..."
 
 # Function to safely register a scheduled task (local to install.ps1 as it's not in helper_functions yet)
+# Note: This function should ideally be in helper_functions.ps1
+# However, due to the order of operations (install script defines, then calls),
+# it's safer to keep it here or ensure proper sourcing.
+# Since helper_functions.ps1 is sourced *before* this function is called,
+# it could theoretically be moved there. But for simplicity and self-containment
+# within the installer's logic flow, it remains here.
 function Register-MiholessScheduledTask {
     Param(
         [string]$TaskName,
