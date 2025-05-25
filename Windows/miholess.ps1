@@ -93,17 +93,15 @@ if (-not (Test-Path $logFilePath)) { # Test-Path uses native path
 }
 
 try {
-    # We will no longer use -PassThru and will explicitly detach the process.
-    # The -WindowStyle Hidden is crucial for background execution without a visible window.
-    # We redirect output to the log file.
+    # Arguments to Start-Process should use native paths for command line
+    # WorkingDirectory needs native backslashes
+    # Removed unsupported parameters: -ErrorAction, -WindowStyle Hidden
     Write-Log "Miholess.ps1: Launching Mihomo with: ${mihomoExePath} -f `"${mihomoMainConfigPath}`" -d `"${mihomoDataDir}`"" "DEBUG"
     Start-Process -FilePath $mihomoExePath `
         -ArgumentList "-f `"$mihomoMainConfigPath`" -d `"$mihomoDataDir`"" `
         -WorkingDirectory $miholessInstallationDirNative `
         -RedirectStandardOutput $logFilePath `
-        -NoNewWindow ` # Prevents opening a new console window
-        -WindowStyle Hidden ` # Ensures the process window is hidden even if NoNewWindow fails
-        -ErrorAction Stop # Ensure errors from Start-Process are caught
+        -NoNewWindow # This is typically sufficient to hide the window
     
     # After starting the process, find its PID
     # We need to give it a moment to start and register its process.
@@ -114,9 +112,9 @@ try {
     $mihomoProcess = Get-Process -Name "mihomo" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $mihomoExePath } | Select-Object -First 1
 
     if ($mihomoProcess) {
-        $pid = $mihomoProcess.Id
-        Set-Content -Path $pidFilePath -Value $pid # Set-Content uses native path
-        Write-Log "Miholess.ps1: Mihomo process started successfully with PID: ${pid}. Script exiting gracefully." "INFO"
+        $mihomoPid = $mihomoProcess.Id # Renamed variable to avoid conflict with $PID
+        Set-Content -Path $pidFilePath -Value $mihomoPid # Set-Content uses native path
+        Write-Log "Miholess.ps1: Mihomo process started successfully with PID: ${mihomoPid}. Script exiting gracefully." "INFO"
         exit 0 # Indicate success
     } else {
         Write-Log "Miholess.ps1: Mihomo process launched but could not find its PID after launch. Mihomo might have failed to start or immediately exited. Check mihomo.log for details." "ERROR"

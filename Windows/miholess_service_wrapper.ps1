@@ -45,22 +45,22 @@ function Stop-MihomoProcess {
     Param([string]$PidFilePath, [string]$MihomoExePath) # These are native paths
     Write-Log "Wrapper: Attempting to stop Mihomo process..."
     if (Test-Path $PidFilePath) { # Test-Path uses native path
-        $pidContent = Get-Content -Path $PidFilePath -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($pidContent -and $pidContent -match '^\d+$') {
-            $pid = [int]$pidContent
+        $mihomoPidContent = Get-Content -Path $PidFilePath -ErrorAction SilentlyContinue | Select-Object -First 1 # Renamed variable
+        if ($mihomoPidContent -and $mihomoPidContent -match '^\d+$') {
+            $mihomoPid = [int]$mihomoPidContent # Renamed variable
             try {
-                $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
+                $process = Get-Process -Id $mihomoPid -ErrorAction SilentlyContinue # Using renamed variable
                 if ($process -and $process.ProcessName -eq "mihomo" -and $process.Path -eq $MihomoExePath) { # Process.Path is native path
-                    Write-Log "Wrapper: Terminating Mihomo process with PID ${pid}." # <-- FIX: ${pid}
+                    Write-Log "Wrapper: Terminating Mihomo process with PID ${mihomoPid}." # Using renamed variable
                     $process | Stop-Process -Force
                     Remove-Item $PidFilePath -ErrorAction SilentlyContinue # Remove-Item uses native path
                     Write-Log "Wrapper: Mihomo process stopped via PID file."
                 } else {
-                    Write-Log "Wrapper: No active Mihomo process found with PID ${pid} matching expected path (${MihomoExePath}), or process name mismatch." "WARN" # <-- FIX: ${pid}
+                    Write-Log "Wrapper: No active Mihomo process found with PID ${mihomoPid} matching expected path (${MihomoExePath}), or process name mismatch." "WARN" # Using renamed variable
                 }
             } catch {
                 $errorMessage = $_.Exception.Message
-                Write-Log "Wrapper: Error stopping process with PID ${pid}: $errorMessage" "ERROR" # <-- FIX: ${pid}
+                Write-Log "Wrapper: Error stopping process with PID ${mihomoPid}: $errorMessage" "ERROR" # Using renamed variable
             }
         } else {
             Write-Log "Wrapper: Invalid or empty PID in ${PidFilePath}." "WARN"
@@ -97,7 +97,7 @@ while ($true) {
         $process = Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$mihomoScriptPath`"" `
             -PassThru `
-            -WindowStyle Hidden `
+            -NoNewWindow ` # This is typically sufficient to hide the window
             -ErrorAction Stop # Ensure errors from Start-Process are caught
         
         Write-Log "Wrapper: miholess.ps1 launched successfully with PID $($process.Id)." "INFO"
