@@ -23,7 +23,9 @@ function Get-MiholessConfig {
         $configContent = $expandedConfigContent | ConvertFrom-Json
         return $configContent
     } catch {
-        Write-Log "Failed to read or parse configuration file: $($_.Exception.Message)" "ERROR"
+        # Store exception message in a variable to avoid parsing issues
+        $errorMessage = $_.Exception.Message
+        Write-Log "Failed to read or parse configuration file: $errorMessage" "ERROR"
         return $null
     }
 }
@@ -41,7 +43,9 @@ function Get-LatestMihomoDownloadUrl {
     try {
         $releaseInfo = Invoke-RestMethod -Uri $apiUrl -Method Get -ErrorAction Stop
     } catch {
-        Write-Log "Error fetching release info from GitHub API: $($_.Exception.Message)" "ERROR"
+        # Store exception message in a variable to avoid parsing issues
+        $errorMessage = $_.Exception.Message
+        Write-Log "Error fetching release info from GitHub API: $errorMessage" "ERROR"
         return $null
     }
 
@@ -114,7 +118,9 @@ function Download-AndExtractMihomo {
     try {
         Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipFile -ErrorAction Stop
     } catch {
-        Write-Log "Failed to download Mihomo: $($_.Exception.Message)" "ERROR"
+        # Store exception message in a variable to avoid parsing issues
+        $errorMessage = $_.Exception.Message
+        Write-Log "Failed to download Mihomo: $errorMessage" "ERROR"
         return $false
     }
 
@@ -132,7 +138,9 @@ function Download-AndExtractMihomo {
                     Start-Sleep -Seconds 1
                 }
             } catch {
-                Write-Log "Could not stop existing mihomo process. It might be in use: $($_.Exception.Message)" "WARN"
+                # Store exception message in a variable to avoid parsing issues
+                $errorMessage = $_.Exception.Message
+                Write-Log "Could not stop existing mihomo process. It might be in use: $errorMessage" "WARN"
             }
             Remove-Item $mihomoExePath -ErrorAction SilentlyContinue
         }
@@ -156,7 +164,9 @@ function Download-AndExtractMihomo {
             return $false
         }
     } catch {
-        Write-Log "Failed to extract Mihomo: $($_.Exception.Message)" "ERROR"
+        # Store exception message in a variable to avoid parsing issues
+        $errorMessage = $_.Exception.Message
+        Write-Log "Failed to extract Mihomo: $errorMessage" "ERROR"
         return $false
     } finally {
         Remove-Item $zipFile -ErrorAction SilentlyContinue
@@ -187,7 +197,9 @@ function Download-MihomoDataFiles {
             Write-Log "Downloading $fileName from $url"
             Invoke-WebRequest -Uri $url -OutFile $destination -ErrorAction Stop
         } catch {
-            Write-Log "Failed to download $fileName: $($_.Exception.Message)" "WARN"
+            # Store exception message in a variable to avoid parsing issues
+            $errorMessage = $_.Exception.Message
+            Write-Log "Failed to download $fileName: $errorMessage" "WARN"
             $success = $false
         }
     }
@@ -209,7 +221,9 @@ function Restart-MiholessService {
             return $false
         }
     } catch {
-        Write-Log "Failed to restart Miholess service: $($_.Exception.Message)" "ERROR"
+        # Store exception message in a variable to avoid parsing issues
+        $errorMessage = $_.Exception.Message
+        Write-Log "Failed to restart Miholess service: $errorMessage" "ERROR"
         return $false
     }
 }
@@ -230,7 +244,9 @@ function Update-MihomoMainConfig {
         try {
             New-Item -ItemType Directory -Path $LocalConfigPath | Out-Null
         } catch {
-            Write-Log "Failed to create local config directory: $($_.Exception.Message)" "ERROR"
+            # Store exception message in a variable to avoid parsing issues
+            $errorMessage = $_.Exception.Message
+            Write-Log "Failed to create local config directory: $errorMessage" "ERROR"
             return $false
         }
     }
@@ -242,7 +258,9 @@ function Update-MihomoMainConfig {
     try {
         $newConfigContent = Invoke-WebRequest -Uri $RemoteConfigUrl -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content
     } catch {
-        Write-Log "Failed to download remote config from $RemoteConfigUrl: $($_.Exception.Message)" "ERROR"
+        # Store exception message in a variable to avoid parsing issues
+        $errorMessage = $_.Exception.Message
+        Write-Log "Failed to download remote config from $RemoteConfigUrl: $errorMessage" "ERROR"
         return $false
     }
 
@@ -256,7 +274,9 @@ function Update-MihomoMainConfig {
         try {
             $existingConfigContent = (Get-Content -Path $targetConfigFilePath | Out-String).Trim()
         } catch {
-            Write-Log "Failed to read existing config at $targetConfigFilePath: $($_.Exception.Message)" "WARN"
+            # Store exception message in a variable to avoid parsing issues
+            $errorMessage = $_.Exception.Message
+            Write-Log "Failed to read existing config at $targetConfigFilePath: $errorMessage" "WARN"
         }
     }
 
@@ -267,11 +287,13 @@ function Update-MihomoMainConfig {
             Write-Log "Main Mihomo config saved to $targetConfigFilePath"
             return $true # Indicates a change was made
         } catch {
-            Write-Log "Failed to save final Mihomo config: $($_.Exception.Message)" "ERROR"
+            # Store exception message in a variable to avoid parsing issues
+            $errorMessage = $_.Exception.Message
+            Write-Log "Failed to save final Mihomo config: $errorMessage" "ERROR"
             return $false
         }
     } else {
-        Write-Log "Configuration content is identical. No update needed."
+        Write-Log "Configuration content is identical. No change needed."
         return $false # Indicates no change
     }
 }
