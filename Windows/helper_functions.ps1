@@ -25,7 +25,7 @@ function Write-Log {
             $targetLogFile = $script:config.log_file.Replace('/', '\')
         } elseif ($script:config -and $script:config.installation_dir) {
             # Otherwise, use miholess_service.log within the installation directory, convert to native path
-            $targetLogFile = (Join-Path $script:config.installation_dir "miholess_service.log").Replace('/', '\')
+            $targetLogFile = (Join-Path $script:config.installation_dir.Replace('/', '\') "miholess_service.log")
         }
     } catch {
         # Ignore errors if config isn't available yet or is malformed.
@@ -56,7 +56,7 @@ function Write-Log {
 function Get-MiholessConfig {
     Param([string]$ConfigFilePath) # ConfigFilePath is already native path
     if (-not (Test-Path -Path $ConfigFilePath)) {
-        Write-Log "Configuration file not found at $ConfigFilePath." "ERROR"
+        Write-Log "Configuration file not found at ${ConfigFilePath}." "ERROR" # Use ${} for safety
         return $null
     }
     try {
@@ -167,7 +167,7 @@ function Download-AndExtractMihomo {
         return $false
     }
 
-    Write-Log "Extracting Mihomo to $DestinationDir" # This is native path
+    Write-Log "Extracting Mihomo to ${DestinationDir}" # Use ${} for safety
     try {
         $targetExeName = "mihomo.exe"
         $targetExePath = Join-Path $DestinationDir $targetExeName # Native path
@@ -206,7 +206,7 @@ function Download-AndExtractMihomo {
                  Write-Log "Mihomo executable found as ${targetExeName} in ${DestinationDir}."
             }
         } else {
-            Write-Log "Could not find any mihomo executable (mihomo*.exe) after extraction in $DestinationDir." "ERROR"
+            Write-Log "Could not find any mihomo executable (mihomo*.exe) after extraction in ${DestinationDir}." "ERROR" # Use ${} for safety
             return $false
         }
     } catch {
@@ -360,7 +360,7 @@ function Invoke-MiholessServiceCommand {
                 }
             }
             default {
-                Write-Log "Unsupported service command for sc.exe: ${Command}" "ERROR" # Using ${} here
+                Write-Log "Unsupported service command for sc.exe: ${Command}" "ERROR"
                 return $false
             }
         }

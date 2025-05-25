@@ -17,7 +17,7 @@ if (Test-Path $helperFunctionsPath) { # Test-Path uses native path
 }
 # From this point, Write-Log is available.
 
-$MiholessInstallDir = "C:\ProgramData\miholess" # Default installation directory. Should match install.ps1 default.
+$DefaultMiholessInstallDir = "C:\ProgramData\miholess" # Default installation directory. Should match install.ps1 default.
 
 # Check for Administrator privileges
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -66,27 +66,27 @@ foreach ($taskName in $taskNames) {
 
 # 3. Delete installation directory
 # Read installation_dir from config.json if it exists, otherwise use default
+$MiholessInstallDirToDelete = $DefaultMiholessInstallDir # Start with default native path
 $loadedConfig = Get-MiholessConfig -ConfigFilePath $configFilePath # Get-MiholessConfig expects native path
 if ($loadedConfig -and $loadedConfig.installation_dir) {
     # Convert forward slashes from config to native backslashes for file system operations
-    $MiholessInstallDir = $loadedConfig.installation_dir.Replace('/', '\')
-    Write-Log "Using configured installation directory for uninstallation: ${MiholessInstallDir}"
+    $MiholessInstallDirToDelete = $loadedConfig.installation_dir.Replace('/', '\')
+    Write-Log "Using configured installation directory for uninstallation: ${MiholessInstallDirToDelete}"
 } else {
-    # $MiholessInstallDir is default, already native
-    Write-Log "Could not load installation directory from config.json. Using default: ${MiholessInstallDir}" "WARN"
+    Write-Log "Could not load installation directory from config.json. Using default: ${MiholessInstallDirToDelete}" "WARN"
 }
 
-if (Test-Path -Path $MiholessInstallDir) { # Test-Path uses native path
-    Write-Log "Deleting installation directory: ${MiholessInstallDir}"
+if (Test-Path -Path $MiholessInstallDirToDelete) { # Test-Path uses native path
+    Write-Log "Deleting installation directory: ${MiholessInstallDirToDelete}"
     try {
-        Remove-Item -Path $MiholessInstallDir -Recurse -Force -ErrorAction Stop # Remove-Item uses native path
+        Remove-Item -Path $MiholessInstallDirToDelete -Recurse -Force -ErrorAction Stop # Remove-Item uses native path
         Write-Log "Installation directory removed successfully."
     } catch {
         $errorMessage = $_.Exception.Message
-        Write-Log "Failed to remove installation directory '${MiholessInstallDir}': $errorMessage" "ERROR"
+        Write-Log "Failed to remove installation directory '${MiholessInstallDirToDelete}': $errorMessage" "ERROR"
     }
 } else {
-    Write-Log "Installation directory '${MiholessInstallDir}' not found." "INFO"
+    Write-Log "Installation directory '${MiholessInstallDirToDelete}' not found." "INFO"
 }
 
 Write-Log "Miholess uninstallation completed."

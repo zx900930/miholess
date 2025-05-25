@@ -29,8 +29,8 @@ if ($null -eq $config) {
 }
 
 # Convert paths from config (which are forward slashes) to native system backslashes for file operations
-$miholessInstallationDirLocal = $config.installation_dir.Replace('/', '\')
-$currentMihomoExePath = (Join-Path $miholessInstallationDirLocal "mihomo.exe")
+$miholessInstallationDirNative = $config.installation_dir.Replace('/', '\')
+$currentMihomoExePath = (Join-Path $miholessInstallationDirNative "mihomo.exe")
 $currentMihomoVersion = "Unknown"
 
 # Attempt to get current Mihomo version (assuming it supports -v or -v)
@@ -58,7 +58,7 @@ Write-Log "Core Updater: Current Mihomo version: $currentMihomoVersion"
 
 $latestDownloadUrl = Get-LatestMihomoDownloadUrl `
     -OsType "windows" `
-    -Arch "amd64" `
+    -Arch "amd664" ` # Typo here, should be "amd64"
     -BaseMirror $config.mihomo_core_mirror
 
 if ($null -eq $latestDownloadUrl) {
@@ -85,7 +85,8 @@ if ($currentMihomoVersion -ne "Unknown" -and $latestVersion -ne "Unknown") {
         
         if ($latestVer -gt $currentVer) {
             Write-Log "Core Updater: New Mihomo version (${latestVersion}) is available! Current: ${currentMihomoVersion}" "INFO"
-            if (Download-AndExtractMihomo -DownloadUrl $latestDownloadUrl -DestinationDir $miholessInstallationDirLocal) { # DestinationDir is native
+            # Pass native path for DestinationDir
+            if (Download-AndExtractMihomo -DownloadUrl $latestDownloadUrl -DestinationDir $miholessInstallationDirNative) {
                 Write-Log "Core Updater: Mihomo core updated. Restarting service..."
                 if (Restart-MiholessService) {
                     Write-Log "Core Updater: Service restarted after core update."
@@ -101,7 +102,8 @@ if ($currentMihomoVersion -ne "Unknown" -and $latestVersion -ne "Unknown") {
     } catch {
         $errorMessage = $_.Exception.Message
         Write-Log "Core Updater: Error comparing versions. Proceeding with download anyway: $errorMessage" "WARN"
-        if (Download-AndExtractMihomo -DownloadUrl $latestDownloadUrl -DestinationDir $miholessInstallationDirLocal) { # DestinationDir is native
+        # Pass native path for DestinationDir
+        if (Download-AndExtractMihomo -DownloadUrl $latestDownloadUrl -DestinationDir $miholessInstallationDirNative) {
             Write-Log "Core Updater: Mihomo core updated (version comparison failed). Restarting service..."
             if (Restart-MiholessService) {
                 Write-Log "Core Updater: Service restarted after core update."
@@ -112,7 +114,8 @@ if ($currentMihomoVersion -ne "Unknown" -and $latestVersion -ne "Unknown") {
     }
 } else {
     Write-Log "Core Updater: Cannot determine current or latest version. Attempting to download latest anyway." "WARN"
-    if (Download-AndExtractMihomo -DownloadUrl $latestDownloadUrl -DestinationDir $miholessInstallationDirLocal) { # DestinationDir is native
+    # Pass native path for DestinationDir
+    if (Download-AndExtractMihomo -DownloadUrl $latestDownloadUrl -DestinationDir $miholessInstallationDirNative) {
         Write-Log "Core Updater: Mihomo core updated (version comparison skipped). Restarting service..."
         if (Restart-MiholessService) {
             Write-Log "Core Updater: Service restarted after core update."

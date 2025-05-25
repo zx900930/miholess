@@ -20,7 +20,7 @@ if (Test-Path $helperFunctionsPath) { # Test-Path uses native path
 }
 # From this point, Write-Log is available and logs to file.
 
-Write-Log "Wrapper: Service wrapper started. Attempting to load configuration from ${configFilePath}." "INFO" # configFilePath is native path
+Write-Log "Wrapper: Service wrapper started. Attempting to load configuration from ${configFilePath}." "INFO"
 
 # Load configuration using helper function. This also sets $script:config for Write-Log.
 # Get-MiholessConfig expects native path
@@ -33,10 +33,10 @@ if ($null -eq $config) {
 # At this point, $script:config is set, and Write-Log will use its log_file or installation_dir.
 
 # Convert paths from config (which are forward slashes) to native system backslashes for file operations
-$miholessInstallationDirLocal = $config.installation_dir.Replace('/', '\')
-$mihomoScriptPath = (Join-Path $miholessInstallationDirLocal "miholess.ps1")
-$pidFilePath = (Join-Path $miholessInstallationDirLocal "mihomo.pid")
-$mihomoExePath = (Join-Path $miholessInstallationDirLocal "mihomo.exe")
+$miholessInstallationDirNative = $config.installation_dir.Replace('/', '\')
+$mihomoScriptPath = (Join-Path $miholessInstallationDirNative "miholess.ps1")
+$pidFilePath = (Join-Path $miholessInstallationDirNative "mihomo.pid")
+$mihomoExePath = (Join-Path $miholessInstallationDirNative "mihomo.exe")
 
 Write-Log "Wrapper: Configuration loaded successfully. Mihomo script path: ${mihomoScriptPath}" "INFO"
 
@@ -51,16 +51,16 @@ function Stop-MihomoProcess {
             try {
                 $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
                 if ($process -and $process.ProcessName -eq "mihomo" -and $process.Path -eq $MihomoExePath) { # Process.Path is native path
-                    Write-Log "Wrapper: Terminating Mihomo process with PID ${pid}."
+                    Write-Log "Wrapper: Terminating Mihomo process with PID ${pid}." # <-- FIX: ${pid}
                     $process | Stop-Process -Force
                     Remove-Item $PidFilePath -ErrorAction SilentlyContinue # Remove-Item uses native path
                     Write-Log "Wrapper: Mihomo process stopped via PID file."
                 } else {
-                    Write-Log "Wrapper: No active Mihomo process found with PID ${pid} matching expected path (${MihomoExePath}), or process name mismatch." "WARN"
+                    Write-Log "Wrapper: No active Mihomo process found with PID ${pid} matching expected path (${MihomoExePath}), or process name mismatch." "WARN" # <-- FIX: ${pid}
                 }
             } catch {
                 $errorMessage = $_.Exception.Message
-                Write-Log "Wrapper: Error stopping process with PID ${pid}: $errorMessage" "ERROR"
+                Write-Log "Wrapper: Error stopping process with PID ${pid}: $errorMessage" "ERROR" # <-- FIX: ${pid}
             }
         } else {
             Write-Log "Wrapper: Invalid or empty PID in ${PidFilePath}." "WARN"

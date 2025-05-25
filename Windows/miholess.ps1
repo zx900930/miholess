@@ -29,12 +29,12 @@ if ($null -eq $config) {
 # At this point, $script:config is set, and Write-Log will use its log_file or installation_dir.
 
 # Convert paths from config (which are forward slashes) to native system backslashes for file operations
-$miholessInstallationDirLocal = $config.installation_dir.Replace('/', '\')
-$mihomoExePath = (Join-Path $miholessInstallationDirLocal "mihomo.exe")
+$miholessInstallationDirNative = $config.installation_dir.Replace('/', '\')
+$mihomoExePath = (Join-Path $miholessInstallationDirNative "mihomo.exe")
 $mihomoMainConfigPath = (Join-Path $config.local_config_path.Replace('/', '\') "config.yaml")
 $mihomoDataDir = $config.local_config_path.Replace('/', '\')
 $logFilePath = $config.log_file.Replace('/', '\') # This is Mihomo's own log file
-$pidFilePath = (Join-Path $miholessInstallationDirLocal "mihomo.pid")
+$pidFilePath = (Join-Path $miholessInstallationDirNative "mihomo.pid")
 
 Write-Log "Miholess.ps1: Checking for mihomo.exe at ${mihomoExePath}." "INFO"
 if (-not (Test-Path $mihomoExePath)) { # Test-Path uses native path
@@ -97,7 +97,7 @@ try {
     # WorkingDirectory needs native backslashes
     $process = Start-Process -FilePath $mihomoExePath `
         -ArgumentList "-f `"$mihomoMainConfigPath`" -d `"$mihomoDataDir`"" `
-        -WorkingDirectory $miholessInstallationDirLocal `
+        -WorkingDirectory $miholessInstallationDirNative `
         -RedirectStandardOutput $logFilePath `
         -RedirectStandardError $logFilePath `
         -PassThru `

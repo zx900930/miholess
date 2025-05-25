@@ -32,27 +32,27 @@ Write-Host "`n--- Miholess Configuration ---" -ForegroundColor Yellow
 Write-Host "Please provide values for the installation. Press Enter to use the default." -ForegroundColor Cyan
 
 # 1. Get Installation Directory
-# Ensure input/default is sanitized to forward slashes for JSON
-$InstallDir = Read-Host "Enter installation directory (Default: $Default_InstallDir)"
-if ([string]::IsNullOrEmpty($InstallDir)) { $InstallDir = $Default_InstallDir }
-$InstallDir = ([System.Environment]::ExpandEnvironmentVariables($InstallDir)).Replace('\', '/') # Expand and standardize slashes
-Write-Log-Temp "Installation Directory: $InstallDir"
+$InstallDirInput = Read-Host "Enter installation directory (Default: $Default_InstallDir)"
+if ([string]::IsNullOrEmpty($InstallDirInput)) { $InstallDirInput = $Default_InstallDir }
+# Store forward-slashed path for JSON/config, and native path for file system operations
+$global:MiholessInstallDirJson = ([System.Environment]::ExpandEnvironmentVariables($InstallDirInput)).Replace('\', '/')
+$global:MiholessInstallDirNative = $global:MiholessInstallDirJson.Replace('/', '\')
+Write-Log-Temp "Installation Directory: ${global:MiholessInstallDirNative}" # Log native path
 
 # Ensure the installation directory exists before attempting to download helper functions into it
-# For file system ops, use system native path
-$InstallDirLocal = $InstallDir.Replace('/', '\')
-if (-not (Test-Path -Path $InstallDirLocal)) {
-    Write-Log-Temp "Creating installation directory: $InstallDirLocal"
-    New-Item -ItemType Directory -Path $InstallDirLocal | Out-Null
+if (-not (Test-Path -Path $global:MiholessInstallDirNative)) {
+    Write-Log-Temp "Creating installation directory: ${global:MiholessInstallDirNative}"
+    New-Item -ItemType Directory -Path $global:MiholessInstallDirNative | Out-Null
 } else {
     Write-Log-Temp "Installation directory already exists. Proceeding with potential re-installation." "WARN"
 }
 
 # --- Download helper_functions.ps1 and source it ---
 $helperFunctionsUrl = "https://raw.githubusercontent.com/zx900930/miholess/main/Windows/helper_functions.ps1"
-$helperFunctionsPath = Join-Path $InstallDirLocal "helper_functions.ps1" # Use native path for download destination
-Write-Log-Temp "Downloading helper_functions.ps1 to $helperFunctionsPath..."
+$helperFunctionsPath = Join-Path $global:MiholessInstallDirNative "helper_functions.ps1" # Use native path for download destination
+Write-Log-Temp "Downloading helper_functions.ps1 to ${helperFunctionsPath}..."
 try {
+    # Ensure TLS 1.2 is enabled for the download (redundant if bootstrap handles, but safe)
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
     (New-Object System.Net.WebClient).DownloadFile($helperFunctionsUrl, $helperFunctionsPath)
     . $helperFunctionsPath # Source the downloaded helper functions (uses native path)
@@ -93,11 +93,12 @@ if ([string]::IsNullOrEmpty($RemoteConfigUrl)) { $RemoteConfigUrl = $Default_Rem
 Write-Log "Remote Config URL: $($RemoteConfigUrl -replace '^$', '<empty>')"
 
 # 7. Get Local Config Path
-# Ensure input/default is sanitized to forward slashes for JSON
-$LocalConfigPath = Read-Host "Enter local configuration folder path (e.g., %USERPROFILE%/my_configs. Default: $($Default_LocalConfigPath))"
-if ([string]::IsNullOrEmpty($LocalConfigPath)) { $LocalConfigPath = $Default_LocalConfigPath }
-$LocalConfigPath = ([System.Environment]::ExpandEnvironmentVariables($LocalConfigPath)).Replace('\', '/') # Expand and standardize slashes
-Write-Log "Local Config Path: $LocalConfigPath"
+$LocalConfigPathInput = Read-Host "Enter local configuration folder path (e.g., %USERPROFILE%/my_configs. Default: $($Default_LocalConfigPath))"
+if ([string]::IsNullOrEmpty($LocalConfigPathInput)) { $LocalConfigPathInput = $Default_LocalConfigPath }
+# Store forward-slashed path for JSON/config, and native path for file system operations
+$global:MiholessLocalConfigPathJson = ([System.Environment]::ExpandEnvironmentVariables($LocalConfigPathInput)).Replace('\', '/')
+$global:MiholessLocalConfigPathNative = $global:MiholessLocalConfigPathJson.Replace('/', '\')
+Write-Log "Local Config Path: ${global:MiholessLocalConfigPathNative}" # Log native path
 
 # 8. Get Mihomo Port
 $MihomoPort = Read-Host "Enter Mihomo listen port (Default: $Default_MihomoPort)"
@@ -110,41 +111,39 @@ $Force = ($ForceInput -eq 'Y' -or $ForceInput -eq 'y')
 Write-Log "Force Re-installation: $Force"
 
 Write-Host "`n--- Installation Summary ---" -ForegroundColor Yellow
-Write-Host "Installation Directory: $InstallDir"
+Write-Host "Installation Directory: ${global:MiholessInstallDirNative}"
 Write-Host "Mihomo Core Mirror: $CoreMirror"
 Write-Host "GeoIP URL: $GeoIpUrl"
 Write-Host "GeoSite URL: $GeoSiteUrl"
 Write-Host "MMDB URL: $MmdbUrl"
-Write-Host "Remote Config URL: $($RemoteConfigUrl -replace '^$', '<empty>') (Will be downloaded to $LocalConfigPath/config.yaml)"
-Write-Host "Local Config Path: $LocalConfigPath (Mihomo data directory)"
+Write-Host "Remote Config URL: $($RemoteConfigUrl -replace '^$', '<empty>') (Will be downloaded to ${global:MiholessLocalConfigPathNative}\config.yaml)"
+Write-Host "Local Config Path: ${global:MiholessLocalConfigPathNative} (Mihomo data directory)"
 Write-Host "Mihomo Port: $MihomoPort"
 Write-Host "Force Re-installation: $Force"
 Write-Host "`nPress Enter to proceed with installation, or Ctrl+C to cancel." -ForegroundColor Green
 Pause | Out-Null # Wait for user to press enter
 
 # --- Populate final configuration hashtable ---
-# All paths here are already sanitized to use forward slashes for JSON safety
+# All paths in this hashtable use forward slashes for JSON safety
 $ConfigToSave = @{
-    installation_dir = $InstallDir
+    installation_dir = $global:MiholessInstallDirJson
     mihomo_core_mirror = $CoreMirror
     geoip_url = $GeoIpUrl
     geosite_url = $GeoSiteUrl
     mmdb_url = $MmdbUrl
     remote_config_url = $RemoteConfigUrl
-    local_config_path = $LocalConfigPath
-    log_file = "${InstallDir}/mihomo.log"
-    pid_file = "${InstallDir}/mihomo.pid"
+    local_config_path = $global:MiholessLocalConfigPathJson
+    log_file = "${global:MiholessInstallDirJson}/mihomo.log"
+    pid_file = "${global:MiholessInstallDirJson}/mihomo.pid"
     mihomo_port = $MihomoPort
 }
 
-$MiholessInstallDir = $InstallDir # For global script scope, still in forward slashes
 $MiholessServiceAccount = "NT AUTHORITY\System" # Remains constant
 
-# 1. (Re-check) Create installation directory - already done above, but good to have safety net
-# Use native path for Test-Path and New-Item
-if (-not (Test-Path -Path $MiholessInstallDirLocal)) {
-    Write-Log "Creating installation directory: ${MiholessInstallDirLocal} (Safety check)" # Use ${} for paths in log
-    New-Item -ItemType Directory -Path $MiholessInstallDirLocal | Out-Null
+# 1. (Re-check) Create installation directory - now using $global:MiholessInstallDirNative
+if (-not (Test-Path -Path $global:MiholessInstallDirNative)) {
+    Write-Log "Creating installation directory: ${global:MiholessInstallDirNative} (Safety check)"
+    New-Item -ItemType Directory -Path $global:MiholessInstallDirNative | Out-Null
 } else {
     if ($Force) {
         Write-Log "Installation directory already exists. Forcing re-installation (confirmed)."
@@ -155,9 +154,9 @@ if (-not (Test-Path -Path $MiholessInstallDirLocal)) {
 }
 
 # 2. Save configuration to JSON file
-$ConfigFilePath = Join-Path $MiholessInstallDirLocal "config.json" # Use native path for file system
-Write-Log "Saving configuration to ${ConfigFilePath}" # Use ${} in log
-$ConfigToSave | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFilePath -Encoding UTF8 # Save with local path
+$ConfigFilePath = Join-Path $global:MiholessInstallDirNative "config.json" # Use native path for file system
+Write-Log "Saving configuration to ${ConfigFilePath}"
+$ConfigToSave | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFilePath -Encoding UTF8
 
 # 3. Download and Extract Mihomo Core
 $mihomoDownloadUrl = Get-LatestMihomoDownloadUrl -OsType "windows" -Arch "amd64" -BaseMirror $CoreMirror
@@ -166,19 +165,20 @@ if ($null -eq $mihomoDownloadUrl) {
     exit 1
 }
 
-# Use native path for DestinationDir
-if (-not (Download-AndExtractMihomo -DownloadUrl $mihomoDownloadUrl -DestinationDir $MiholessInstallDirLocal)) {
+# Pass native path for DestinationDir
+if (-not (Download-AndExtractMihomo -DownloadUrl $mihomoDownloadUrl -DestinationDir $global:MiholessInstallDirNative)) {
     Write-Log "Failed to download and extract Mihomo. Installation aborted." "ERROR"
     exit 1
 }
 
 # 4. Download GeoIP, GeoSite, MMDB files
-if (-not (Download-MihomoDataFiles -InstallationDir $MiholessInstallDirLocal -GeoIpUrl $GeoIpUrl -GeoSiteUrl $GeoSiteUrl -MmdbUrl $MmdbUrl)) {
+# Pass native path for InstallationDir
+if (-not (Download-MihomoDataFiles -InstallationDir $global:MiholessInstallDirNative -GeoIpUrl $GeoIpUrl -GeoSiteUrl $GeoSiteUrl -MmdbUrl $MmdbUrl)) {
     Write-Log "Some data files failed to download. Check logs for details." "WARN"
 }
 
 # 5. Download remaining scripts to installation directory (by downloading from GitHub)
-Write-Log "Downloading remaining Miholess scripts to ${MiholessInstallDirLocal}..." # Use native path in log
+Write-Log "Downloading remaining Miholess scripts to ${global:MiholessInstallDirNative}..."
 # helper_functions.ps1 is already downloaded and sourced
 $scriptsToDownload = @(
     "miholess_core_updater.ps1",
@@ -190,8 +190,8 @@ $scriptsToDownload = @(
 foreach ($script in $scriptsToDownload) {
     $sourceUrl = "https://raw.githubusercontent.com/zx900930/miholess/main/Windows/$script"
     # Ensure destPath uses system native backslashes for file operation
-    $destPath = (Join-Path $MiholessInstallDirLocal $script)
-    Write-Log "Downloading '${script}' from '${sourceUrl}' to '${destPath}'..." # Added destPath to log
+    $destPath = (Join-Path $global:MiholessInstallDirNative $script)
+    Write-Log "Downloading '${script}' from '${sourceUrl}' to '${destPath}'..."
     try {
         (New-Object System.Net.WebClient).DownloadFile($sourceUrl, $destPath)
         Write-Log "Downloaded '${script}'."
@@ -208,7 +208,7 @@ $displayName = "Miholess Core Service"
 $description = "Manages Mihomo core and configurations, ensures autostart."
 # Service binary path must use native system backslashes
 $serviceBinaryPath = "powershell.exe"
-$serviceWrapperScriptPath = (Join-Path $MiholessInstallDirLocal "miholess_service_wrapper.ps1")
+$serviceWrapperScriptPath = (Join-Path $global:MiholessInstallDirNative "miholess_service_wrapper.ps1") # Native path
 $serviceArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$serviceWrapperScriptPath`""
 
 # Check if service exists and remove if Force is used
@@ -290,15 +290,14 @@ function Register-MiholessScheduledTask {
 $commonSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -StopIfGoingOnBatteries:$false -DontStopIfGoingOnBatteries -AllowStartOnDemand -Enabled -RunOnlyIfNetworkAvailable
 
 # Task: Mihomo Core Updater
-$taskNameCore = "Miholess_Core_Updater"
-$scriptCorePath = "${MiholessInstallDir}/miholess_core_updater.ps1" # Use forward slashes as it comes from $MiholessInstallDir
-$triggerCore = New-ScheduledTaskTrigger -Daily -At "03:00" # Run daily at 3 AM
+# Path for scheduled task uses forward slashes, will be converted by Register-MiholessScheduledTask
+$scriptCorePath = "${global:MiholessInstallDirJson}/miholess_core_updater.ps1"
 Register-MiholessScheduledTask -TaskName $taskNameCore -Description "Updates Mihomo core to the latest non-Go version." `
     -ScriptPath $scriptCorePath -Triggers $triggerCore -Settings $commonSettings
 
 # Task: Mihomo Config Updater
-$taskNameConfig = "Miholess_Config_Updater"
-$scriptConfigPath = "${MiholessInstallDir}/miholess_config_updater.ps1" # Use forward slashes
+# Path for scheduled task uses forward slashes, will be converted by Register-MiholessScheduledTask
+$scriptConfigPath = "${global:MiholessInstallDirJson}/miholess_config_updater.ps1"
 # Run every hour starting at midnight, duration 1 day (meaning it will run for 24 hours, then then repeat daily)
 $triggerConfig = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 1) -At "00:00" 
 Register-MiholessScheduledTask -TaskName $taskNameConfig -Description "Updates Mihomo remote and local configurations." `
