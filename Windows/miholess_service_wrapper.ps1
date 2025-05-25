@@ -94,33 +94,30 @@ while ($true) {
     try {
         # Arguments to Start-Process should use native paths for command line
         # $mihomoScriptPath is already a native path
-        $process = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$mihomoScriptPath`"" `
-            -PassThru `
-            -NoNewWindow ` # This is typically sufficient to hide the window
-            -ErrorAction Stop # Ensure errors from Start-Process are caught
+        # Removed unsupported parameters: -PassThru, -NoNewWindow, -ErrorAction Stop
+        # Rely on the service wrapper to ensure the launched PowerShell process stays hidden.
+        Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$mihomoScriptPath`""
         
-        Write-Log "Wrapper: miholess.ps1 launched successfully with PID $($process.Id)." "INFO"
+        # The line above does not return a process object.
+        # So we cannot rely on $process.Id or $process.WaitForExit() here directly.
+        # The outer service control manager will monitor the 'powershell.exe' process that *this* script starts.
+        # We need to explicitly break the loop here and let the service wrapper exit,
+        # otherwise, it will just keep re-launching `miholess.ps1` indefinitely.
+        # This wrapper's role is to ensure `miholess.ps1` *starts*.
+        # The monitoring of Mihomo's PID should be handled by `miholess.ps1` if it stays resident,
+        # OR by the service manager if `miholess.ps1` exits immediately (which is our goal).
 
-        # Wait for the child process to exit, then restart it if it failed
-        $process.WaitForExit()
-
-        $exitCode = $process.ExitCode
-        Write-Log "Wrapper: miholess.ps1 exited with code: ${exitCode}." "INFO"
-
-        # Clean up PID file if the child process exited
-        Remove-Item $pidFilePath -ErrorAction SilentlyContinue # Remove-Item uses native path
-        
-        # Log reason for restart
-        if ($exitCode -ne 0) {
-            Write-Log "Wrapper: miholess.ps1 exited with non-zero code (${exitCode}). This indicates an error. Restarting in 5 seconds." "WARN"
-        } else {
-            Write-Log "Wrapper: miholess.ps1 exited gracefully (code ${exitCode}). Restarting in 5 seconds." "INFO"
-        }
+        # If Start-Process doesn't throw, we assume it launched successfully.
+        Write-Log "Wrapper: miholess.ps1 launched (potentially hidden). Wrapper exiting to let service manager monitor the spawned process." "INFO"
+        # The service itself will then monitor the "powershell.exe" process we just started,
+        # and if it terminates, the service manager will restart this wrapper.
+        # This is the standard behavior for Type=simple services where ExecStart is a long-running process.
+        exit 0 # Exit successfully, letting the service manager continue.
 
     } catch {
         $errorMessage = $_.Exception.Message
-        Write-Log "Wrapper: Failed to launch or monitor miholess.ps1: $errorMessage. Restarting in 5 seconds." "ERROR"
+        Write-Log "Wrapper: Failed to launch miholess.ps1: $errorMessage. Restarting wrapper in 5 seconds." "ERROR"
     }
     
     Start-Sleep -Seconds 5

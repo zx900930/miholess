@@ -95,7 +95,7 @@ if (-not (Test-Path $logFilePath)) { # Test-Path uses native path
 try {
     # Arguments to Start-Process should use native paths for command line
     # WorkingDirectory needs native backslashes
-    # Removed unsupported parameters: -ErrorAction, -WindowStyle Hidden
+    # Removed unsupported parameters: -ErrorAction, -WindowStyle Hidden, -PassThru
     Write-Log "Miholess.ps1: Launching Mihomo with: ${mihomoExePath} -f `"${mihomoMainConfigPath}`" -d `"${mihomoDataDir}`"" "DEBUG"
     Start-Process -FilePath $mihomoExePath `
         -ArgumentList "-f `"$mihomoMainConfigPath`" -d `"$mihomoDataDir`"" `
