@@ -5,8 +5,8 @@ function Write-Log {
     $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     "[$Timestamp][$Level] $Message" | Out-Host
     # Optionally, write to a specific log file as well
-    # $logFilePath = "C:\ProgramData\miholess\miholess_install.log" # Example log path
-    # "$Timestamp [$Level] $Message" | Out-File -FilePath $logFilePath -Append -Encoding UTF8
+    $logFilePath = "C:\ProgramData\miholess\miholess_install.log" # Example log path
+    "$Timestamp [$Level] $Message" | Out-File -FilePath $logFilePath -Append -Encoding UTF8
 }
 
 function Get-MiholessConfig {
