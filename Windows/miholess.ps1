@@ -93,22 +93,35 @@ if (-not (Test-Path $logFilePath)) { # Test-Path uses native path
 }
 
 try {
-    # Arguments to Start-Process should use native paths for command line
-    # WorkingDirectory needs native backslashes
-    $process = Start-Process -FilePath $mihomoExePath `
+    # We will no longer use -PassThru and will explicitly detach the process.
+    # The -WindowStyle Hidden is crucial for background execution without a visible window.
+    # We redirect output to the log file.
+    Write-Log "Miholess.ps1: Launching Mihomo with: ${mihomoExePath} -f `"${mihomoMainConfigPath}`" -d `"${mihomoDataDir}`"" "DEBUG"
+    Start-Process -FilePath $mihomoExePath `
         -ArgumentList "-f `"$mihomoMainConfigPath`" -d `"$mihomoDataDir`"" `
         -WorkingDirectory $miholessInstallationDirNative `
         -RedirectStandardOutput $logFilePath `
-        # -RedirectStandardError $logFilePath  <-- REMOVED THIS LINE
-        -PassThru `
-        -NoNewWindow `
+        -NoNewWindow ` # Prevents opening a new console window
+        -WindowStyle Hidden ` # Ensures the process window is hidden even if NoNewWindow fails
         -ErrorAction Stop # Ensure errors from Start-Process are caught
     
-    $pid = $process.Id
-    Set-Content -Path $pidFilePath -Value $pid # Set-Content uses native path
-    Write-Log "Miholess.ps1: Mihomo process started successfully with PID: ${pid}. Script exiting gracefully to allow service wrapper to monitor." "INFO"
+    # After starting the process, find its PID
+    # We need to give it a moment to start and register its process.
+    Start-Sleep -Milliseconds 500 # Small delay
+    
+    # Try to find the process by name and working directory (most reliable)
+    # Filter by Path property to ensure it's OUR mihomo.exe instance.
+    $mihomoProcess = Get-Process -Name "mihomo" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $mihomoExePath } | Select-Object -First 1
 
-    exit 0
+    if ($mihomoProcess) {
+        $pid = $mihomoProcess.Id
+        Set-Content -Path $pidFilePath -Value $pid # Set-Content uses native path
+        Write-Log "Miholess.ps1: Mihomo process started successfully with PID: ${pid}. Script exiting gracefully." "INFO"
+        exit 0 # Indicate success
+    } else {
+        Write-Log "Miholess.ps1: Mihomo process launched but could not find its PID after launch. Mihomo might have failed to start or immediately exited. Check mihomo.log for details." "ERROR"
+        exit 1 # Indicate failure
+    }
 
 } catch {
     $errorMessage = $_.Exception.Message
