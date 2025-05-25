@@ -40,7 +40,8 @@ function Write-Log {
             New-Item -ItemType Directory -Path $logDir -ErrorAction Stop | Out-Null
         } catch {
             # If log directory cannot be created, output error to console and proceed without file logging
-            "[$Timestamp][ERROR] Failed to create log directory $logDir: $($_.Exception.Message)" | Out-Host
+            $errorMessage = $_.Exception.Message # Capture error message reliably
+            "[$Timestamp][ERROR] Failed to create log directory ${logDir}: $errorMessage" | Out-Host # <-- FIX: ${logDir}
             return # Skip file logging
         }
     }
@@ -50,7 +51,8 @@ function Write-Log {
         $logEntry | Out-File -FilePath $targetLogFile -Append -Encoding UTF8 -ErrorAction SilentlyContinue
     } catch {
         # If writing to file fails (e.g., permission denied), output to console as a last resort
-        "[$Timestamp][ERROR] Failed to write to log file $targetLogFile: $($_.Exception.Message)" | Out-Host
+        $errorMessage = $_.Exception.Message # Capture error message reliably
+        "[$Timestamp][ERROR] Failed to write to log file ${targetLogFile}: $errorMessage" | Out-Host # <-- FIX: ${targetLogFile}
     }
 }
 
@@ -283,7 +285,7 @@ function Restart-MiholessService {
             Write-Log "Miholess service restarted successfully."
             return $true
         } else {
-            Write-Log "Miholess service '$ServiceName' not found. Cannot restart." "WARN"
+            Write-Log "Miholess service '${ServiceName}' not found. Cannot restart." "WARN" # <-- FIX: ${ServiceName}
             return $false
         }
     } catch {
@@ -306,7 +308,7 @@ function Update-MihomoMainConfig {
         return $false
     }
     if (-not (Test-Path -Path $LocalConfigPath)) {
-        Write-Log "Local config directory not found: $LocalConfigPath. Creating it." "INFO"
+        Write-Log "Local config directory not found: ${LocalConfigPath}. Creating it." "INFO" # <-- FIX: ${LocalConfigPath}
         try {
             New-Item -ItemType Directory -Path $LocalConfigPath | Out-Null
         } catch {
