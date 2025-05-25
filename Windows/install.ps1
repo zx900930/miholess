@@ -189,48 +189,44 @@ if (-not (Download-MihomoDataFiles -DestinationDir $global:MiholessLocalConfigPa
     Write-Log "Some data files failed to download. Check logs for details." "WARN"
 }
 
-# 5. Copy NSSM and other scripts to installation directory
-Write-Log "Copying NSSM and Miholess scripts to ${global:MiholessInstallDirNative}..."
+# 5. Download NSSM and other scripts to installation directory
+Write-Log "Downloading NSSM and Miholess scripts to ${global:MiholessInstallDirNative}..."
 
-# Path to NSSM executable within the repository structure
-$nssmSourcePath = (Split-Path -Parent $MyInvocation.MyCommand.Definition) + "\nssm\nssm.exe" # Relative path to NSSM
-$nssmExePath = Join-Path $global:MiholessInstallDirNative "nssm.exe" # Target path for nssm.exe in install dir
-
-if (-not (Test-Path $nssmSourcePath)) {
-    Write-Log "NSSM executable not found at ${nssmSourcePath}. Please ensure nssm.exe is located in the Windows/nssm/ subfolder of the Miholess repository." "ERROR"
-    exit 1
-}
+# NSSM Download URL from your GitHub repository (assuming it's placed in Windows/nssm/)
+$nssmRepoUrl = "https://github.com/zx900930/miholess/raw/main/Windows/nssm/nssm.exe" # Use raw link
+$nssmExePath = Join-Path $global:MiholessInstallDirNative "nssm.exe" # Target path for nssm.exe
 
 try {
-    Copy-Item -Path $nssmSourcePath -Destination $nssmExePath -Force
-    Write-Log "NSSM copied to ${nssmExePath}."
+    Write-Log "Downloading NSSM from $nssmRepoUrl..."
+    (New-Object System.Net.WebClient).DownloadFile($nssmRepoUrl, $nssmExePath) # Directly download nssm.exe
+    Write-Log "NSSM downloaded to ${nssmExePath}."
 } catch {
     $errorMessage = $_.Exception.Message
-    Write-Log "Failed to copy NSSM from repo: $errorMessage" "ERROR"
+    Write-Log "Failed to download NSSM from repository: $errorMessage. Ensure nssm.exe is committed to ${nssmRepoUrl}." "ERROR"
     exit 1
 }
 
 
-# Copy other Miholess scripts
+# Download other Miholess scripts
 # helper_functions.ps1 is already downloaded and sourced
-$scriptsToCopy = @(
+$scriptsToDownload = @(
     "miholess_core_updater.ps1",
     "miholess_config_updater.ps1",
     "miholess.ps1", # miholess.ps1 will be run directly by NSSM
     "uninstall.ps1" # Ensure uninstall script is present
 )
-foreach ($script in $scriptsToCopy) {
-    # Assume these scripts are in the same directory as install.ps1 in the repo
-    $sourcePath = (Split-Path -Parent $MyInvocation.MyCommand.Definition) + "\$script"
+foreach ($script in $scriptsToDownload) {
+    # Assume these scripts are in the same directory as install.ps1 on GitHub
+    $sourceUrl = "https://raw.githubusercontent.com/zx900930/miholess/main/Windows/$script"
     # Ensure destPath uses system native backslashes for file operation
     $destPath = (Join-Path $global:MiholessInstallDirNative $script)
-    Write-Log "Copying '${script}' from '${sourcePath}' to '${destPath}'..."
+    Write-Log "Downloading '${script}' from '${sourceUrl}' to '${destPath}'..."
     try {
-        Copy-Item -Path $sourcePath -Destination $destPath -Force
-        Write-Log "Copied '${script}'."
+        (New-Object System.Net.WebClient).DownloadFile($sourceUrl, $destPath)
+        Write-Log "Downloaded '${script}'."
     } catch {
         $errorMessage = $_.Exception.Message
-        Write-Log "Warning: Failed to copy '${script}' from '${sourcePath}': $errorMessage. Skipping." "WARN"
+        Write-Log "Warning: Failed to download '${script}' from '${sourceUrl}': $errorMessage. Skipping." "WARN"
     }
 }
 

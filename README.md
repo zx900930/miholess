@@ -19,7 +19,7 @@
 - **Automated Data File Updates:** Keeps your `geoip.dat`, `geosite.dat`, and `country.mmdb` files up-to-date from specified URLs.
 - **Automated Configuration Updates:** Downloads a remote configuration file and saves it as `config.yaml` within a specified local folder, which Mihomo then uses.
 - **Cross-Platform Automation:**
-  - **Windows:** Utilizes PowerShell, NSSM (Non-Sucking Service Manager) for robust Windows Services, and Scheduled Tasks for periodic updates.
+  - **Windows:** Utilizes PowerShell, [NSSM (Non-Sucking Service Manager)](https://nssm.cc/) for robust Windows Services, and Scheduled Tasks for periodic updates.
   - **Linux:** (Planned) Will use Bash scripts, systemd services, and cron jobs/systemd timers for equivalent functionality.
 - **Customizable Sources:** Allows users to specify custom mirror URLs for Mihomo binaries and data files, as well as a custom remote configuration URL.
 - **Flexible Configuration Management:** Use a single remote URL for your main configuration, or manage your `config.yaml` entirely locally.
@@ -37,7 +37,9 @@ miholess/
 │   ├── miholess_core_updater.ps1  # Script to update Mihomo core
 │   ├── miholess_config_updater.ps1 # Script to update remote configurations
 │   ├── miholess.ps1            # Main Mihomo execution script (run by NSSM)
-│   └── helper_functions.ps1    # Common PowerShell functions
+│   ├── helper_functions.ps1    # Common PowerShell functions
+│   └── nssm/                   # Directory containing bundled NSSM executable
+│       └── nssm.exe
 ├── Linux/
 │   ├── install.sh              # (Planned) Main installation script
 │   ├── uninstall.sh            # (Planned) Uninstallation script
@@ -61,6 +63,8 @@ miholess/
 
 The installation process is interactive and guided by the script. The following simple one-liner initiates the process by downloading and executing the main installer script.
 
+**Important:** For NSSM to be available, you **must ensure a compatible `nssm.exe` (preferably the `win64` version) is placed in `miholess/Windows/nssm/` in your repository** before running the installation command.
+
 **Recommended (Simple One-liner for fresh install):**
 
 Open **PowerShell as Administrator** and run the following command. The script will then prompt you for configuration details:
@@ -73,7 +77,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 - `Set-ExecutionPolicy Bypass -Scope Process -Force`: This temporarily sets the PowerShell execution policy to `Bypass` for the current PowerShell session (process), allowing the script to run without security prompts. The `-Force` parameter suppresses the confirmation message.
 - `[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072`: This explicitly enables TLS 1.2 (value 3072) for web requests within the current session. This helps prevent issues when downloading files from HTTPS URLs, especially on older Windows versions.
-- `irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex`: This downloads the `install.ps1` script content directly from GitHub using `Invoke-RestMethod` (`irm`) and immediately executes it using `Invoke-Expression` (`iex`). The `install.ps1` script then handles downloading all other necessary components (like `helper_functions.ps1` and NSSM).
+- `irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex`: This downloads the `install.ps1` script content directly from GitHub using `Invoke-RestMethod` (`irm`) and immediately executes it using `Invoke-Expression` (`iex`). The `install.ps1` script then handles downloading all other necessary components (like `helper_functions.ps1` and NSSM) from your repository.
 
 **Interactive Setup Steps:**
 
@@ -93,7 +97,7 @@ After you provide all details, a summary will be displayed, and you'll be asked 
 
 After installation, `miholess` will:
 
-1.  Download NSSM and all necessary Miholess PowerShell scripts to the installation directory.
+1.  Copy NSSM and all necessary Miholess PowerShell scripts to the installation directory.
 2.  Download the latest Mihomo core and required data files.
 3.  Create a `config.json` file in the installation directory based on your input.
 4.  Set up a Windows Service named `MiholessService` using NSSM to ensure Mihomo runs automatically on system startup and restarts if it crashes.
@@ -194,6 +198,7 @@ _(This section will be filled once the Linux scripts are developed)_
 - **Installation Failure / Script Quits Without Logs**: If the installation one-liner fails immediately or provides no output, double-check that you are running PowerShell as Administrator and have a stable internet connection.
 - **"Security policy stopped it from running" or parsing errors**: Ensure you are using the exact one-liner provided in the "Recommended (Simple One-liner for fresh install)" section.
 - **"Script must be run with Administrator privileges"**: Ensure you open PowerShell by right-clicking its icon and selecting "Run as administrator".
+- **NSSM not found / "Cannot bind argument to parameter 'Path'" for NSSM**: Ensure `nssm.exe` is correctly placed in the `Windows/nssm/` folder within your repository and committed. The installer downloads it directly from your repo's raw link.
 - **Mihomo not running / Service restarting**:
   - Check `Get-Service MiholessService` status. If stopped, try `Start-Service MiholessService`.
   - Crucially, check `C:\ProgramData\miholess\mihomo.log` for direct errors from Mihomo itself.

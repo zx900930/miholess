@@ -40,6 +40,7 @@ if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $serviceName) {
     Write-Log "Removing service '${serviceName}' using NSSM..."
     if (Test-Path $nssmExePath) {
         try {
+            # Use & to execute nssm.exe and pipe output to Out-Null
             & "${nssmExePath}" stop "${serviceName}" | Out-Null # Ensure it's stopped via NSSM
             & "${nssmExePath}" remove "${serviceName}" confirm | Out-Null # Use 'confirm' for unattended removal
             Write-Log "Service '${serviceName}' removed successfully using NSSM."
