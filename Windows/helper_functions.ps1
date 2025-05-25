@@ -1,12 +1,57 @@
 # Windows/helper_functions.ps1
 
+# Define a default log path for background scripts. This path will be used if a more specific path
+# from config.json cannot be determined (e.g., during early script startup).
+$global:MiholessDefaultServiceLogPath = "C:\ProgramData\miholess\miholess_service.log"
+
 function Write-Log {
     Param([string]$Message, [string]$Level = "INFO")
     $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "[$Timestamp][$Level] $Message" | Out-Host
-    # Optionally, write to a specific log file as well
-    $logFilePath = "C:\ProgramData\miholess\miholess_install.log" # Example log path
-    "$Timestamp [$Level] $Message" | Out-File -FilePath $logFilePath -Append -Encoding UTF8
+    $logEntry = "[$Timestamp][$Level] $Message"
+    
+    # Always output to console for interactive debugging during installation
+    $logEntry | Out-Host
+    
+    # Determine the log file path for background logging
+    $targetLogFile = $global:MiholessDefaultServiceLogPath # Start with default fallback
+
+    # Attempt to get the log file path from a loaded configuration
+    # This requires the calling script (e.g., miholess_service_wrapper.ps1) to have loaded $config
+    # and potentially set $script:config for global access.
+    # We prioritize mihomo.log if it's explicitly set in config, otherwise use miholess_service.log.
+    try {
+        # Check if a global $config variable exists and has relevant properties
+        if ($script:config -and $script:config.log_file -and ($script:config.log_file -ne (Join-Path $script:config.installation_dir "mihomo.log"))) {
+            # Use Mihomo's specific log file if it's different from default
+            $targetLogFile = $script:config.log_file
+        } elseif ($script:config -and $script:config.installation_dir) {
+            # Otherwise, use miholess_service.log within the installation directory
+            $targetLogFile = Join-Path $script:config.installation_dir "miholess_service.log"
+        }
+    } catch {
+        # Ignore errors if config isn't available yet or is malformed.
+        # $targetLogFile will remain $global:MiholessDefaultServiceLogPath
+    }
+
+    # Ensure the directory for the log file exists
+    $logDir = Split-Path $targetLogFile -Parent
+    if (-not (Test-Path $logDir)) {
+        try {
+            New-Item -ItemType Directory -Path $logDir -ErrorAction Stop | Out-Null
+        } catch {
+            # If log directory cannot be created, output error to console and proceed without file logging
+            "[$Timestamp][ERROR] Failed to create log directory $logDir: $($_.Exception.Message)" | Out-Host
+            return # Skip file logging
+        }
+    }
+
+    # Write to the log file
+    try {
+        $logEntry | Out-File -FilePath $targetLogFile -Append -Encoding UTF8 -ErrorAction SilentlyContinue
+    } catch {
+        # If writing to file fails (e.g., permission denied), output to console as a last resort
+        "[$Timestamp][ERROR] Failed to write to log file $targetLogFile: $($_.Exception.Message)" | Out-Host
+    }
 }
 
 function Get-MiholessConfig {
@@ -20,8 +65,9 @@ function Get-MiholessConfig {
         $rawConfigContent = Get-Content -Path $ConfigFilePath | Out-String
         $expandedConfigContent = [System.Environment]::ExpandEnvironmentVariables($rawConfigContent)
         
-        $configContent = $expandedConfigContent | ConvertFrom-Json
-        return $configContent
+        # Load the configuration into a script-scope variable so Write-Log can access it
+        $script:config = $expandedConfigContent | ConvertFrom-Json
+        return $script:config
     } catch {
         # Store exception message in a variable to avoid parsing issues
         $errorMessage = $_.Exception.Message
