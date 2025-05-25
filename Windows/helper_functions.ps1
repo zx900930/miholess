@@ -63,12 +63,14 @@ function Get-LatestMihomoDownloadUrl {
     }
     Write-Log "DEBUG: Found $($assets.Count) assets."
 
-    $osArchPattern = "mihomo-${OsType}-${Arch}" # Use curly braces for clarity, though not strictly needed here
-    $candidateUrls = @() # Array to hold potential candidate URLs
+    $osArchPattern = "mihomo-${OsType}-${Arch}"
+    # FIX: Explicitly define $candidateUrls as an ArrayList to prevent unexpected type coercions
+    [System.Collections.ArrayList]$candidateUrls = @() 
 
     foreach ($asset in $assets) {
         $assetName = $asset.name
-        $downloadUrl = $asset.browser_download_url
+        # FIX: Explicitly cast to string to ensure the download URL is always a string type
+        [string]$downloadUrl = $asset.browser_download_url 
 
         if (-not $assetName -or -not $downloadUrl) {
             continue
@@ -84,18 +86,20 @@ function Get-LatestMihomoDownloadUrl {
             continue
         }
         
-        Write-Log "DEBUG: Candidate - Asset: ${assetName}, URL: ${downloadUrl}" # Use curly braces for clarity
+        Write-Log "DEBUG: Candidate - Asset: ${assetName}, URL: ${downloadUrl}"
 
         # Prioritize 'compatible' versions by adding them to the beginning
         if ($assetName -match 'compatible') {
-            # FIX: Ensure array concatenation when prepending
-            $candidateUrls = @($downloadUrl) + $candidateUrls 
+            # FIX: Use ArrayList's Insert method which is more predictable for prepending
+            $candidateUrls.Insert(0, $downloadUrl) 
         } else {
-            $candidateUrls += $downloadUrl # Append
+            # FIX: Use ArrayList's Add method
+            $candidateUrls.Add($downloadUrl) 
         }
     }
 
-    if (-not $candidateUrls) {
+    # FIX: Check count for ArrayList directly
+    if ($candidateUrls.Count -eq 0) { 
         Write-Log "No suitable Mihomo binary found for ${OsType}-${Arch} (excluding Go versions: ${ExcludeGoVersions})." "ERROR"
         return $null
     }
@@ -207,7 +211,7 @@ function Download-MihomoDataFiles {
             # Store exception message in a variable to avoid parsing issues
             $errorMessage = $_.Exception.Message
             Write-Log "Failed to download ${fileName}: $errorMessage" "WARN"
-            $success = $false
+            $success = false
         }
     }
     return $success
