@@ -48,6 +48,7 @@ function Get-LatestMihomoDownloadUrl {
         Write-Log "Error fetching release info from GitHub API: $errorMessage" "ERROR"
         return $null
     }
+    Write-Log "DEBUG: API call successful for releases." # NEW DEBUG LOG
 
     $tagName = $releaseInfo.tag_name
     if (-not $tagName) {
@@ -60,6 +61,7 @@ function Get-LatestMihomoDownloadUrl {
         Write-Log "No assets found for the latest release." "ERROR"
         return $null
     }
+    Write-Log "DEBUG: Found $($assets.Count) assets." # NEW DEBUG LOG
 
     $osArchPattern = "mihomo-$OsType-$Arch"
     $candidateUrls = @() # Array to hold potential candidate URLs
@@ -81,6 +83,8 @@ function Get-LatestMihomoDownloadUrl {
         if ($ExcludeGoVersions -and ($assetName -match '-go\d+\b')) {
             continue
         }
+        
+        Write-Log "DEBUG: Candidate - Asset: $assetName, URL: $downloadUrl" # NEW DEBUG LOG
 
         # Prioritize 'compatible' versions by adding them to the beginning
         if ($assetName -match 'compatible') {
@@ -91,19 +95,21 @@ function Get-LatestMihomoDownloadUrl {
     }
 
     if (-not $candidateUrls) {
-        Write-Log "No suitable Mihomo binary found for $OsType-$Arch (excluding Go versions: $ExcludeGoVersions)." "ERROR"
+        Write-Log "No suitable Mihomo binary found for ${OsType}-${Arch} (excluding Go versions: ${ExcludeGoVersions})." "ERROR"
         return $null
     }
+    Write-Log "DEBUG: Found $($candidateUrls.Count) candidate URLs. First candidate: $($candidateUrls[0])" # NEW DEBUG LOG
 
-    $finalUrl = $candidateUrls[0] # Get the highest priority URL
+    $finalUrl = $candidateUrls[0]
 
     # If a custom mirror is provided, replace the base GitHub URL
     if ($BaseMirror -ne "https://github.com/MetaCubeX/mihomo/releases/download/" -and $finalUrl -match "github.com/MetaCubeX/mihomo/releases/download/") {
         $relativePath = $finalUrl -replace "https://github.com/MetaCubeX/mihomo/releases/download/", ""
         $finalUrl = Join-Path -Path $BaseMirror -ChildPath $relativePath
-        Write-Log "Using custom mirror: $BaseMirror"
+        Write-Log "Using custom mirror: ${BaseMirror}"
     }
-
+    
+    Write-Log "DEBUG: Final URL before return: $finalUrl" # NEW DEBUG LOG
     return $finalUrl
 }
 
@@ -194,12 +200,12 @@ function Download-MihomoDataFiles {
         $url = $dataFiles[$fileName]
         $destination = Join-Path $InstallationDir $fileName
         try {
-            Write-Log "Downloading ${fileName} from $url" # <-- FIX HERE
+            Write-Log "Downloading ${fileName} from $url"
             Invoke-WebRequest -Uri $url -OutFile $destination -ErrorAction Stop
         } catch {
             # Store exception message in a variable to avoid parsing issues
             $errorMessage = $_.Exception.Message
-            Write-Log "Failed to download ${fileName}: $errorMessage" "WARN" # <-- FIX HERE
+            Write-Log "Failed to download ${fileName}: $errorMessage" "WARN"
             $success = $false
         }
     }
@@ -252,10 +258,7 @@ function Update-MihomoMainConfig {
     }
 
     $targetConfigFilePath = Join-Path $LocalConfigPath "config.yaml"
-    Write-Log "Downloading remote config from: ${RemoteConfigUrl} to ${targetConfigFilePath}" # <-- FIX HERE
-    # Also fixed a previous line here
-    # Write-Log "Downloading remote config from: $RemoteConfigUrl to $targetConfigFilePath"
-    # Should be: Write-Log "Downloading remote config from: ${RemoteConfigUrl} to ${targetConfigFilePath}"
+    Write-Log "Downloading remote config from: ${RemoteConfigUrl} to ${targetConfigFilePath}"
 
 
     $newConfigContent = $null
@@ -264,7 +267,7 @@ function Update-MihomoMainConfig {
     } catch {
         # Store exception message in a variable to avoid parsing issues
         $errorMessage = $_.Exception.Message
-        Write-Log "Failed to download remote config from ${RemoteConfigUrl}: $errorMessage" "ERROR" # <-- FIX HERE
+        Write-Log "Failed to download remote config from ${RemoteConfigUrl}: $errorMessage" "ERROR"
         return $false
     }
 
@@ -280,7 +283,7 @@ function Update-MihomoMainConfig {
         } catch {
             # Store exception message in a variable to avoid parsing issues
             $errorMessage = $_.Exception.Message
-            Write-Log "Failed to read existing config at ${targetConfigFilePath}: $errorMessage" "WARN" # <-- FIX HERE
+            Write-Log "Failed to read existing config at ${targetConfigFilePath}: $errorMessage" "WARN"
         }
     }
 
