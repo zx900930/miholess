@@ -12,24 +12,18 @@ function Write-Log {
     # Always output to console for interactive debugging during installation
     $logEntry | Out-Host
     
-    # Determine the log file path for background logging
-    $targetLogFile = $global:MiholessDefaultServiceLogPath # Start with default fallback (native path)
+    # Determine the log file path for background logging.
+    # It should NOT be mihomo.log to avoid contention with mihomo.exe.
+    # It should always be miholess_service.log within the installation directory.
+    $targetLogFile = $global:MiholessDefaultServiceLogPath # Default fallback
 
-    # Attempt to get the log file path from a loaded configuration
-    # This requires the calling script (e.g., miholess_service_wrapper.ps1) to have loaded $config
-    # and potentially set $script:config for global access.
-    # We prioritize mihomo.log if it's explicitly set in config, otherwise use miholess_service.log.
     try {
-        if ($script:config -and $script:config.log_file) {
-            # Use config.log_file, convert to native path for file system
-            $targetLogFile = $script:config.log_file.Replace('/', '\')
-        } elseif ($script:config -and $script:config.installation_dir) {
-            # Otherwise, use miholess_service.log within the installation directory, convert to native path
+        if ($script:config -and $script:config.installation_dir) {
+            # Use miholess_service.log within the installation directory, convert to native path
             $targetLogFile = (Join-Path $script:config.installation_dir.Replace('/', '\') "miholess_service.log")
         }
     } catch {
         # Ignore errors if config isn't available yet or is malformed.
-        # $targetLogFile will remain $global:MiholessDefaultServiceLogPath
     }
 
     # Ensure the directory for the log file exists
@@ -307,8 +301,8 @@ function Invoke-MiholessServiceCommand {
                 "remove" {
                     Remove-Service -Name $ServiceName -ErrorAction Stop
                     Write-Log "Service '${ServiceName}' deleted using cmdlet. Waiting for full removal..."
-                    $maxWaitSeconds = 30
-                    $intervalSeconds = 2
+                    $maxWaitSeconds = 30 # Max wait time for service to disappear
+                    $intervalSeconds = 2 # Check every 2 seconds
                     $waitedSeconds = 0
                     do {
                         Start-Sleep -Seconds $intervalSeconds
