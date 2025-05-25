@@ -1,5 +1,5 @@
 # Windows/install.ps1
-# This script performs the interactive installation. It is meant to be called by bootstrap_install.ps1.
+# This script performs the interactive installation. It is meant to be called directly via irm | iex.
 
 # --- Default Configuration Values (for interactive prompts) ---
 # Use forward slashes for all internal defaults and examples for JSON compatibility
@@ -48,11 +48,13 @@ if (-not (Test-Path -Path $global:MiholessInstallDirNative)) {
 }
 
 # --- Download helper_functions.ps1 and source it ---
+# This assumes helper_functions.ps1 is still online in the repo and copied from there.
+# It ensures any helper function changes are picked up without requiring an update to install.ps1 itself.
 $helperFunctionsUrl = "https://raw.githubusercontent.com/zx900930/miholess/main/Windows/helper_functions.ps1"
 $helperFunctionsPath = Join-Path $global:MiholessInstallDirNative "helper_functions.ps1" # Use native path for download destination
 Write-Log-Temp "Downloading helper_functions.ps1 to ${helperFunctionsPath}..."
 try {
-    # Ensure TLS 1.2 is enabled for the download (redundant if bootstrap handles, but safe)
+    # Ensure TLS 1.2 is enabled for the download
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
     (New-Object System.Net.WebClient).DownloadFile($helperFunctionsUrl, $helperFunctionsPath)
     . $helperFunctionsPath # Source the downloaded helper functions (uses native path)
@@ -139,7 +141,7 @@ $ConfigToSave = @{
     remote_config_url = $RemoteConfigUrl
     local_config_path = $global:MiholessLocalConfigPathJson
     log_file = "${global:MiholessInstallDirJson}/mihomo.log"
-    pid_file = "${global:MiholessInstallDirJson}/mihomo.pid"
+    pid_file = "${global:MiholessInstallDirJson}/mihomo.pid" # PID file will still be written by miholess.ps1 for updates
     mihomo_port = $MihomoPort
 }
 
@@ -177,8 +179,8 @@ if (-not (Download-AndExtractMihomo -DownloadUrl $mihomoDownloadUrl -Destination
 }
 
 # 4. Download GeoIP, GeoSite, MMDB files
-# IMPORTANT FIX: Download to the Mihomo data directory ($global:MiholessLocalConfigPathNative)
-# not the installation directory. Ensure it's not null.
+# IMPORTANT: Download to the Mihomo data directory ($global:MiholessLocalConfigPathNative)
+# not the installation directory.
 if ([string]::IsNullOrEmpty($global:MiholessLocalConfigPathNative)) {
     Write-Log "Error: Local config path is empty. Cannot download geodata files." "ERROR"
     exit 1 # Critical failure, cannot proceed without a valid local config path
@@ -187,39 +189,60 @@ if (-not (Download-MihomoDataFiles -DestinationDir $global:MiholessLocalConfigPa
     Write-Log "Some data files failed to download. Check logs for details." "WARN"
 }
 
-# 5. Download remaining scripts to installation directory (by downloading from GitHub)
-Write-Log "Downloading remaining Miholess scripts to ${global:MiholessInstallDirNative}..."
+# 5. Copy NSSM and other scripts to installation directory
+Write-Log "Copying NSSM and Miholess scripts to ${global:MiholessInstallDirNative}..."
+
+# Path to NSSM executable within the repository structure
+$nssmSourcePath = (Split-Path -Parent $MyInvocation.MyCommand.Definition) + "\nssm\nssm.exe" # Relative path to NSSM
+$nssmExePath = Join-Path $global:MiholessInstallDirNative "nssm.exe" # Target path for nssm.exe in install dir
+
+if (-not (Test-Path $nssmSourcePath)) {
+    Write-Log "NSSM executable not found at ${nssmSourcePath}. Please ensure nssm.exe is located in the Windows/nssm/ subfolder of the Miholess repository." "ERROR"
+    exit 1
+}
+
+try {
+    Copy-Item -Path $nssmSourcePath -Destination $nssmExePath -Force
+    Write-Log "NSSM copied to ${nssmExePath}."
+} catch {
+    $errorMessage = $_.Exception.Message
+    Write-Log "Failed to copy NSSM from repo: $errorMessage" "ERROR"
+    exit 1
+}
+
+
+# Copy other Miholess scripts
 # helper_functions.ps1 is already downloaded and sourced
-$scriptsToDownload = @(
+$scriptsToCopy = @(
     "miholess_core_updater.ps1",
     "miholess_config_updater.ps1",
-    "miholess_service_wrapper.ps1",
-    "miholess.ps1",
+    "miholess.ps1", # miholess.ps1 will be run directly by NSSM
     "uninstall.ps1" # Ensure uninstall script is present
 )
-foreach ($script in $scriptsToDownload) {
-    $sourceUrl = "https://raw.githubusercontent.com/zx900930/miholess/main/Windows/$script"
+foreach ($script in $scriptsToCopy) {
+    # Assume these scripts are in the same directory as install.ps1 in the repo
+    $sourcePath = (Split-Path -Parent $MyInvocation.MyCommand.Definition) + "\$script"
     # Ensure destPath uses system native backslashes for file operation
     $destPath = (Join-Path $global:MiholessInstallDirNative $script)
-    Write-Log "Downloading '${script}' from '${sourceUrl}' to '${destPath}'..."
+    Write-Log "Copying '${script}' from '${sourcePath}' to '${destPath}'..."
     try {
-        (New-Object System.Net.WebClient).DownloadFile($sourceUrl, $destPath)
-        Write-Log "Downloaded '${script}'."
+        Copy-Item -Path $sourcePath -Destination $destPath -Force
+        Write-Log "Copied '${script}'."
     } catch {
         $errorMessage = $_.Exception.Message
-        Write-Log "Warning: Failed to download '${script}' from '${sourceUrl}': $errorMessage. Skipping." "WARN"
+        Write-Log "Warning: Failed to copy '${script}' from '${sourcePath}': $errorMessage. Skipping." "WARN"
     }
 }
 
 
-# 6. Create Windows Service
+# 6. Create Windows Service using NSSM
 $serviceName = "MiholessService"
 $displayName = "Miholess Core Service"
 $description = "Manages Mihomo core and configurations, ensures autostart."
-# Service binary path must use native system backslashes
-$serviceBinaryPath = "powershell.exe"
-$serviceWrapperScriptPath = (Join-Path $global:MiholessInstallDirNative "miholess_service_wrapper.ps1") # Native path
-$serviceArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$serviceWrapperScriptPath`""
+# NSSM will execute powershell.exe -NoProfile -ExecutionPolicy Bypass -File <path_to_miholess.ps1>
+$nssmAppPath = "powershell.exe"
+$nssmAppArgs = "-NoProfile -ExecutionPolicy Bypass -File `"" + (Join-Path $global:MiholessInstallDirNative "miholess.ps1") + "`""
+$mihomoLogPathNative = $ConfigToSave.log_file.Replace('/', '\') # Mihomo's log path from config
 
 # Check if service exists and remove if Force is used
 if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $serviceName) {
@@ -234,26 +257,35 @@ if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $serviceName) {
     Start-Sleep -Seconds 2 # Give it a moment to clean up
 }
 
-Write-Log "Creating Windows Service '${serviceName}'..."
+Write-Log "Creating Windows Service '${serviceName}' using NSSM..."
 try {
-    if (-not (Invoke-MiholessServiceCommand -Command "create" -ServiceName $serviceName `
-                                            -DisplayName $displayName -Description $description `
-                                            -BinaryPathName "$serviceBinaryPath $serviceArguments" `
-                                            -StartupType "auto")) {
-        throw "Failed to create service using available methods."
-    }
-    
-    # Set service dependencies (e.g., depends on network being available)
-    # This specifically uses sc.exe as it's the reliable way for dependencies
+    # NSSM install command
+    & "${nssmExePath}" install "${serviceName}" "${nssmAppPath}" "${nssmAppArgs}" | Out-Null
+
+    # NSSM service configuration
+    & "${nssmExePath}" set "${serviceName}" DisplayName "${displayName}" | Out-Null
+    & "${nssmExePath}" set "${serviceName}" Description "${description}" | Out-Null
+    & "${nssmExePath}" set "${serviceName}" AppDirectory "${global:MiholessInstallDirNative}" | Out-Null # Set working directory
+    & "${nssmExePath}" set "${serviceName}" AppStdout "${mihomoLogPathNative}" | Out-Null # Redirect stdout to Mihomo's log
+    & "${nssmExePath}" set "${serviceName}" AppStderr "${mihomoLogPathNative}" | Out-Null # Redirect stderr to Mihomo's log
+    & "${nssmExePath}" set "${serviceName}" AppStdoutCreationDisposition 4 | Out-Null # Always create/overwrite log
+    & "${nssmExePath}" set "${serviceName}" AppStderrCreationDisposition 4 | Out-Null # Always create/overwrite log
+    & "${nssmExePath}" set "${serviceName}" AppRestartDelay 5000 | Out-Null # Restart after 5 seconds if crashes
+    & "${nssmExePath}" set "${serviceName}" AppThrottle 5000 | Out-Null # Prevent rapid restarts
+    & "${nssmExePath}" set "${serviceName}" AppExitAction Restart | Out-Null # Always restart on exit
+    & "${nssmExePath}" set "${serviceName}" Start "SERVICE_AUTO_START" | Out-Null # Set startup type to Automatic
+
+    # Set service dependencies (still using sc.exe as NSSM doesn't have direct command for this)
     $dependCmd = "sc.exe config $serviceName depend= Nsi/TcpIp"
     Write-Log "Setting service dependency: $dependCmd"
-    Invoke-Expression $dependCmd | Out-Null # Redirect output to null
+    Invoke-Expression $dependCmd | Out-Null
 
+    # Start the service
     if (-not (Invoke-MiholessServiceCommand -Command "start" -ServiceName $serviceName)) {
         throw "Failed to start service using available methods."
     }
 
-    Write-Log "Windows Service '${serviceName}' created and started successfully."
+    Write-Log "Windows Service '${serviceName}' created and started successfully using NSSM."
 } catch {
     $errorMessage = $_.Exception.Message
     Write-Log "Failed to create or start Windows Service '${serviceName}': $errorMessage" "ERROR"
@@ -265,12 +297,6 @@ try {
 Write-Log "Creating scheduled tasks..."
 
 # Function to safely register a scheduled task (local to install.ps1 as it's not in helper_functions yet)
-# Note: This function should ideally be in helper_functions.ps1
-# However, due to the order of operations (install script defines, then calls),
-# it's safer to keep it here or ensure proper sourcing.
-# Since helper_functions.ps1 is sourced *before* this function is called,
-# it could theoretically be moved there. But for simplicity and self-containment
-# within the installer's logic flow, it remains here.
 function Register-MiholessScheduledTask {
     Param(
         [string]$TaskName,
@@ -300,15 +326,14 @@ function Register-MiholessScheduledTask {
 $commonSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -StopIfGoingOnBatteries:$false -DontStopIfGoingOnBatteries -AllowStartOnDemand -Enabled -RunOnlyIfNetworkAvailable
 
 # Task: Mihomo Core Updater
-# Path for scheduled task uses forward slashes, will be converted by Register-MiholessScheduledTask
-$taskNameCore = "Miholess_Core_Updater" # Define variable
+$taskNameCore = "Miholess_Core_Updater"
 $scriptCorePath = "${global:MiholessInstallDirJson}/miholess_core_updater.ps1"
+$triggerCore = New-ScheduledTaskTrigger -Daily -At "03:00" # Run daily at 3 AM
 Register-MiholessScheduledTask -TaskName $taskNameCore -Description "Updates Mihomo core to the latest non-Go version." `
     -ScriptPath $scriptCorePath -Triggers $triggerCore -Settings $commonSettings
 
 # Task: Mihomo Config Updater
-# Path for scheduled task uses forward slashes, will be converted by Register-MiholessScheduledTask
-$taskNameConfig = "Miholess_Config_Updater" # Define variable
+$taskNameConfig = "Miholess_Config_Updater"
 $scriptConfigPath = "${global:MiholessInstallDirJson}/miholess_config_updater.ps1"
 # Run every hour starting at midnight, duration 1 day (meaning it will run for 24 hours, then then repeat daily)
 $triggerConfig = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 1) -At "00:00" 
@@ -320,4 +345,4 @@ Write-Log "Scheduled tasks created successfully."
 Write-Log "Miholess installation completed successfully!"
 Write-Log "You can check service status with: Get-Service MiholessService"
 Write-Log "And scheduled tasks with: Get-ScheduledTask -TaskName Miholess_*"
-Write-Log "To configure, edit: ${ConfigFilePath}" # ConfigFilePath is already native, safe to use
+Write-Log "To configure, edit: ${ConfigFilePath}"

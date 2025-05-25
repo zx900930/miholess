@@ -29,16 +29,37 @@ Write-Log "Starting Miholess uninstallation..."
 
 # 1. Stop and remove Windows Service
 $serviceName = "MiholessService"
+# Path to NSSM executable (assume it's in the installation directory)
+$nssmExePath = Join-Path $DefaultMiholessInstallDir "nssm.exe"
+
 if (Invoke-MiholessServiceCommand -Command "query" -ServiceName $serviceName) {
     Write-Log "Stopping service '${serviceName}'..."
     if (-not (Invoke-MiholessServiceCommand -Command "stop" -ServiceName $serviceName)) {
         Write-Log "Failed to stop existing service '${serviceName}'. Attempting to remove anyway." "WARN"
     }
-    Write-Log "Removing service '${serviceName}'..."
-    if (Invoke-MiholessServiceCommand -Command "remove" -ServiceName $serviceName) {
-        Write-Log "Service '${serviceName}' removed successfully."
+    Write-Log "Removing service '${serviceName}' using NSSM..."
+    if (Test-Path $nssmExePath) {
+        try {
+            & "${nssmExePath}" stop "${serviceName}" | Out-Null # Ensure it's stopped via NSSM
+            & "${nssmExePath}" remove "${serviceName}" confirm | Out-Null # Use 'confirm' for unattended removal
+            Write-Log "Service '${serviceName}' removed successfully using NSSM."
+        } catch {
+            $errorMessage = $_.Exception.Message
+            Write-Log "Failed to remove service '${serviceName}' using NSSM: $errorMessage. Falling back to sc.exe." "WARN"
+            # Fallback to sc.exe if nssm removal fails
+            if (Invoke-MiholessServiceCommand -Command "remove" -ServiceName $serviceName) {
+                Write-Log "Service '${serviceName}' removed successfully using sc.exe fallback."
+            } else {
+                Write-Log "Failed to remove service '${serviceName}' with fallback. Manual removal might be required." "ERROR"
+            }
+        }
     } else {
-        Write-Log "Failed to remove service '${serviceName}'. Manual removal might be required." "ERROR"
+        Write-Log "NSSM executable not found at ${nssmExePath}. Attempting removal using sc.exe fallback." "WARN"
+        if (Invoke-MiholessServiceCommand -Command "remove" -ServiceName $serviceName) {
+            Write-Log "Service '${serviceName}' removed successfully using sc.exe fallback."
+        } else {
+            Write-Log "Failed to remove service '${serviceName}' with fallback. Manual removal might be required." "ERROR"
+        }
     }
 } else {
     Write-Log "Service '${serviceName}' not found." "INFO"

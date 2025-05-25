@@ -19,7 +19,7 @@
 - **Automated Data File Updates:** Keeps your `geoip.dat`, `geosite.dat`, and `country.mmdb` files up-to-date from specified URLs.
 - **Automated Configuration Updates:** Downloads a remote configuration file and saves it as `config.yaml` within a specified local folder, which Mihomo then uses.
 - **Cross-Platform Automation:**
-  - **Windows:** Utilizes PowerShell, Windows Services for continuous operation, and Scheduled Tasks for periodic updates.
+  - **Windows:** Utilizes PowerShell, NSSM (Non-Sucking Service Manager) for robust Windows Services, and Scheduled Tasks for periodic updates.
   - **Linux:** (Planned) Will use Bash scripts, systemd services, and cron jobs/systemd timers for equivalent functionality.
 - **Customizable Sources:** Allows users to specify custom mirror URLs for Mihomo binaries and data files, as well as a custom remote configuration URL.
 - **Flexible Configuration Management:** Use a single remote URL for your main configuration, or manage your `config.yaml` entirely locally.
@@ -36,8 +36,7 @@ miholess/
 │   ├── uninstall.ps1           # Uninstallation script
 │   ├── miholess_core_updater.ps1  # Script to update Mihomo core
 │   ├── miholess_config_updater.ps1 # Script to update remote configurations
-│   ├── miholess_service_wrapper.ps1 # Wrapper for the Windows Service
-│   ├── miholess.ps1            # Main Mihomo execution script
+│   ├── miholess.ps1            # Main Mihomo execution script (run by NSSM)
 │   └── helper_functions.ps1    # Common PowerShell functions
 ├── Linux/
 │   ├── install.sh              # (Planned) Main installation script
@@ -60,7 +59,7 @@ miholess/
 
 ### Windows Installation
 
-The installation process is interactive and guided by the script. The following simple one-liner initiates the process by downloading and executing a small bootstrap script, which then handles the main installation.
+The installation process is interactive and guided by the script. The following simple one-liner initiates the process by downloading and executing the main installer script.
 
 **Recommended (Simple One-liner for fresh install):**
 
@@ -72,9 +71,9 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 **Explanation of the one-liner:**
 
-- `Set-ExecutionPolicy Bypass -Scope Process -Force`: This temporarily sets the PowerShell execution policy to `Bypass` for the current PowerShell session (process), allowing the bootstrap script to run without security prompts. The `-Force` parameter suppresses the confirmation message.
+- `Set-ExecutionPolicy Bypass -Scope Process -Force`: This temporarily sets the PowerShell execution policy to `Bypass` for the current PowerShell session (process), allowing the script to run without security prompts. The `-Force` parameter suppresses the confirmation message.
 - `[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072`: This explicitly enables TLS 1.2 (value 3072) for web requests within the current session. This helps prevent issues when downloading files from HTTPS URLs, especially on older Windows versions.
-- `irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex`: This downloads the lightweight `install.ps1` script content directly from GitHub using `Invoke-RestMethod` (`irm`) and immediately executes it using `Invoke-Expression` (`iex`). The `install.ps1` then takes over, downloading and running the main `install.ps1` script, and handling temporary files.
+- `irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/install.ps1 | iex`: This downloads the `install.ps1` script content directly from GitHub using `Invoke-RestMethod` (`irm`) and immediately executes it using `Invoke-Expression` (`iex`). The `install.ps1` script then handles downloading all other necessary components (like `helper_functions.ps1` and NSSM).
 
 **Interactive Setup Steps:**
 
@@ -94,10 +93,10 @@ After you provide all details, a summary will be displayed, and you'll be asked 
 
 After installation, `miholess` will:
 
-1.  Download all necessary Miholess PowerShell scripts to the installation directory.
+1.  Download NSSM and all necessary Miholess PowerShell scripts to the installation directory.
 2.  Download the latest Mihomo core and required data files.
 3.  Create a `config.json` file in the installation directory based on your input.
-4.  Set up a Windows Service named `MiholessService` to ensure Mihomo runs automatically on system startup and restarts if it crashes.
+4.  Set up a Windows Service named `MiholessService` using NSSM to ensure Mihomo runs automatically on system startup and restarts if it crashes.
 5.  Create two Scheduled Tasks:
     - `Miholess_Core_Updater`: Runs daily at 3:00 AM to check for and update the Mihomo core.
     - `Miholess_Config_Updater`: Runs hourly to check for and update the remote configuration.
@@ -184,7 +183,7 @@ To uninstall `miholess`, open **PowerShell as Administrator** and run the follow
 Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; irm https://raw.githubusercontent.com/zx900930/miholess/main/Windows/uninstall.ps1 | iex
 ```
 
-This script will stop and remove the Windows Service, unregister the scheduled tasks, and delete the Miholess installation directory.
+This script will stop and remove the Windows Service (using NSSM), unregister the scheduled tasks, and delete the Miholess installation directory.
 
 ### Linux Uninstallation (Planned)
 
@@ -192,12 +191,13 @@ _(This section will be filled once the Linux scripts are developed)_
 
 ## Troubleshooting
 
-- **Installation Failure / Script Quits Without Logs**: If the installation one-liner fails immediately or provides no output, double-check that you are running PowerShell as Administrator and have a stable internet connection. The `bootstrap_install.ps1` script is designed to be robust, but fundamental issues like missing admin rights or network problems can still prevent it from starting.
+- **Installation Failure / Script Quits Without Logs**: If the installation one-liner fails immediately or provides no output, double-check that you are running PowerShell as Administrator and have a stable internet connection.
 - **"Security policy stopped it from running" or parsing errors**: Ensure you are using the exact one-liner provided in the "Recommended (Simple One-liner for fresh install)" section.
 - **"Script must be run with Administrator privileges"**: Ensure you open PowerShell by right-clicking its icon and selecting "Run as administrator".
-- **Mihomo not running**:
+- **Mihomo not running / Service restarting**:
   - Check `Get-Service MiholessService` status. If stopped, try `Start-Service MiholessService`.
-  - Check the `mihomo.log` file in your installation directory for errors.
+  - Crucially, check `C:\ProgramData\miholess\mihomo.log` for direct errors from Mihomo itself.
+  - Also check `C:\ProgramData\miholess\miholess_service.log` for logs from the PowerShell service.
   - Ensure no other application is using Mihomo's configured port (`mihomo_port`).
   - Verify that a valid `config.yaml` exists in your `local_config_path` directory.
 - **Updates not happening**:

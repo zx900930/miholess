@@ -1,6 +1,6 @@
 # Windows/miholess.ps1
-# This script is responsible for starting Mihomo and managing its configuration.
-# It is typically called by miholess_service_wrapper.ps1
+# This script is responsible for setting up Mihomo's configuration and launching it.
+# It is meant to be run directly by NSSM as a Windows service.
 
 # Determine the actual installation directory for proper log path
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
@@ -33,8 +33,8 @@ $miholessInstallationDirNative = $config.installation_dir.Replace('/', '\')
 $mihomoExePath = (Join-Path $miholessInstallationDirNative "mihomo.exe")
 $mihomoMainConfigPath = (Join-Path $config.local_config_path.Replace('/', '\') "config.yaml")
 $mihomoDataDir = $config.local_config_path.Replace('/', '\')
-$logFilePath = $config.log_file.Replace('/', '\') # This is Mihomo's own log file
-$pidFilePath = (Join-Path $miholessInstallationDirNative "mihomo.pid")
+$logFilePath = $config.log_file.Replace('/', '\') # This is Mihomo's own log file, managed by NSSM redirection
+$pidFilePath = (Join-Path $miholessInstallationDirNative "mihomo.pid") # PID file still needed for updater scripts
 
 Write-Log "Miholess.ps1: Checking for mihomo.exe at ${mihomoExePath}." "INFO"
 if (-not (Test-Path $mihomoExePath)) { # Test-Path uses native path
@@ -69,60 +69,41 @@ if (-not (Test-Path $mihomoMainConfigPath)) { # Test-Path uses native path
     Write-Log "Miholess.ps1: Main config file found." "INFO"
 }
 
-# Start Mihomo
-Write-Log "Miholess.ps1: Starting Mihomo process..." "INFO"
+# NSSM will handle stdout/stderr redirection and process monitoring/restarts.
+# This script just needs to launch mihomo.exe and exit.
+
+Write-Log "Miholess.ps1: Launching Mihomo process for NSSM to monitor..." "INFO"
 Write-Log "Miholess.ps1: Mihomo executable: ${mihomoExePath}" "DEBUG"
 Write-Log "Miholess.ps1: Mihomo main config: ${mihomoMainConfigPath}" "DEBUG"
 Write-Log "Miholess.ps1: Mihomo data directory: ${mihomoDataDir}" "DEBUG"
-Write-Log "Miholess.ps1: Mihomo logging to: ${logFilePath}" "DEBUG"
-
-# Create log file for Mihomo if it doesn't exist, and ensure its directory exists
-$mihomoLogDir = Split-Path $logFilePath -Parent # Native path
-if (-not (Test-Path $mihomoLogDir)) { # Test-Path uses native path
-    Write-Log "Miholess.ps1: Creating Mihomo log directory: ${mihomoLogDir}" "INFO"
-    try {
-        New-Item -Path $mihomoLogDir -ItemType Directory -Force -ErrorAction Stop | Out-Null # New-Item uses native path
-    } catch {
-        $errorMessage = $_.Exception.Message
-        Write-Log "Miholess.ps1: Failed to create Mihomo log directory ${mihomoLogDir}: $errorMessage. Mihomo logging might fail." "WARN"
-    }
-}
-if (-not (Test-Path $logFilePath)) { # Test-Path uses native path
-    Write-Log "Miholess.ps1: Creating Mihomo log file: ${logFilePath}" "INFO"
-    New-Item -Path $logFilePath -ItemType File -Force | Out-Null # New-Item uses native path
-}
+# Note: Mihomo's logging will be redirected by NSSM to the configured AppStdout/AppStderr
 
 try {
-    # Arguments to Start-Process should use native paths for command line
-    # WorkingDirectory needs native backslashes
-    # Removed unsupported parameters: -ErrorAction, -WindowStyle Hidden, -PassThru
-    Write-Log "Miholess.ps1: Launching Mihomo with: ${mihomoExePath} -f `"${mihomoMainConfigPath}`" -d `"${mihomoDataDir}`"" "DEBUG"
+    # Start Mihomo as a background process. No need for RedirectStandardOutput here, NSSM handles it.
+    # No need for PassThru, NoNewWindow, WindowStyle Hidden, ErrorAction.
+    # NSSM starts miholess.ps1 in a hidden window, so mihomo.exe will inherit that.
     Start-Process -FilePath $mihomoExePath `
         -ArgumentList "-f `"$mihomoMainConfigPath`" -d `"$mihomoDataDir`"" `
-        -WorkingDirectory $miholessInstallationDirNative `
-        -RedirectStandardOutput $logFilePath `
-        -NoNewWindow # This is typically sufficient to hide the window
+        -WorkingDirectory $miholessInstallationDirNative 
     
-    # After starting the process, find its PID
-    # We need to give it a moment to start and register its process.
-    Start-Sleep -Milliseconds 500 # Small delay
+    # After starting the process, find its PID and write it to the PID file.
+    # This PID file is used by updater scripts to know which process to restart.
+    Start-Sleep -Milliseconds 500 # Give Mihomo a moment to start
     
-    # Try to find the process by name and working directory (most reliable)
-    # Filter by Path property to ensure it's OUR mihomo.exe instance.
     $mihomoProcess = Get-Process -Name "mihomo" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $mihomoExePath } | Select-Object -First 1
 
     if ($mihomoProcess) {
-        $mihomoPid = $mihomoProcess.Id # Renamed variable to avoid conflict with $PID
-        Set-Content -Path $pidFilePath -Value $mihomoPid # Set-Content uses native path
-        Write-Log "Miholess.ps1: Mihomo process started successfully with PID: ${mihomoPid}. Script exiting gracefully." "INFO"
-        exit 0 # Indicate success
+        $mihomoPid = $mihomoProcess.Id
+        Set-Content -Path $pidFilePath -Value $mihomoPid
+        Write-Log "Miholess.ps1: Mihomo process launched successfully with PID: ${mihomoPid}. Script exiting gracefully." "INFO"
+        exit 0 # Indicate success to NSSM
     } else {
-        Write-Log "Miholess.ps1: Mihomo process launched but could not find its PID after launch. Mihomo might have failed to start or immediately exited. Check mihomo.log for details." "ERROR"
-        exit 1 # Indicate failure
+        Write-Log "Miholess.ps1: Mihomo process launched but could not find its PID. Mihomo might have failed to start. Check system logs for errors." "ERROR"
+        exit 1 # Indicate failure to NSSM
     }
 
 } catch {
     $errorMessage = $_.Exception.Message
-    Write-Log "Miholess.ps1: Failed to start Mihomo: $errorMessage. Exiting." "ERROR"
+    Write-Log "Miholess.ps1: Failed to launch Mihomo: $errorMessage. Exiting." "ERROR"
     exit 1
 }
