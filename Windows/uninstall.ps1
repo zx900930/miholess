@@ -74,11 +74,16 @@ $taskNames = @(
 foreach ($taskName in $taskNames) {
     Write-Log "Attempting to unregister scheduled task '${taskName}' using schtasks.exe..."
     try {
-        # Check if task exists first
+        # FIX: Correctly check if task exists by parsing schtasks.exe /query output
         $taskQueryArgs = @("/query", "/TN", "`"${taskName}`"", "/FO", "LIST")
         $taskQueryResult = (& schtasks.exe $taskQueryArgs 2>&1)
         
-        if ($LASTEXITCODE -eq 0 -and $taskQueryResult -match "TaskName") { # Task exists
+        # Check if the query returned a task name or if it explicitly says not found
+        # (Chinese for "ERROR: The system cannot find the task specified.")
+        $taskExists = ($taskQueryResult -join "`n" -match "TaskName:") # Look for "TaskName:" indicating task exists
+        $taskNotFoundError = ($taskQueryResult -join "`n" -match "错误: 指定的服务不存在。" -or $taskQueryResult -join "`n" -match "ERROR: The system cannot find the task specified.")
+
+        if ($taskExists -and -not $taskNotFoundError) { # Task exists
             Write-Log "Scheduled task '${taskName}' found. Deleting..." "WARN"
             # Use proper argument array for schtasks.exe /delete
             $deleteArgs = @("/delete", "/TN", "`"${taskName}`"", "/F")
@@ -89,8 +94,11 @@ foreach ($taskName in $taskNames) {
             } else {
                 throw "schtasks.exe /delete command failed: $result"
             }
-        } else {
+        } elseif ($taskNotFoundError) {
             Write-Log "Scheduled task '${taskName}' not found. Skipping unregistration." "INFO"
+        } else {
+            Write-Log "Failed to query task '${taskName}' or unexpected output. Skipping unregistration." "WARN"
+            Write-Log "Query output: ($($taskQueryResult -join ' '))" "DEBUG"
         }
     } catch {
         $errorMessage = $_.Exception.Message
