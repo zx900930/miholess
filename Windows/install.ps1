@@ -1,6 +1,9 @@
 # Windows/install.ps1
 # This script performs the interactive installation. It is meant to be called directly via irm | iex.
 
+# --- Set console code page to UTF-8 for proper character display ---
+chcp 65001 | Out-Null
+
 # --- Default Configuration Values (for interactive prompts) ---
 # Use forward slashes for all internal defaults and examples for JSON compatibility
 $Default_InstallDir = "C:/ProgramData/miholess"
@@ -321,7 +324,7 @@ function Register-MiholessScheduledTask {
     # Check if task exists and remove if so
     try {
         $taskQuery = (schtasks.exe /query /TN `"${TaskName}`" /FO LIST 2>&1)
-        if ($LASTEXITCODE -eq 0) { # Task exists
+        if ($LASTEXITCODE -eq 0 -and ($taskQuery -join "`n" -match "TaskName:")) { # Task exists
             Write-Log "Scheduled task '${TaskName}' already exists. Deleting old task." "WARN"
             # Use separate args for schtasks.exe /delete
             (schtasks.exe /delete /TN `"${TaskName}`" /F 2>&1) | Out-Null
@@ -371,7 +374,7 @@ function Register-MiholessScheduledTask {
         Write-Log "Executing schtasks command: schtasks.exe $($schtasksArgs -join ' ')" "DEBUG"
         $result = (& schtasks.exe $schtasksArgs 2>&1)
         
-        if ($LASTEXITCODE -eq 0 -and $result -match "SUCCESS") {
+        if ($LASTEXITCODE -eq 0 -and ($result -join "`n" -match "SUCCESS")) { # FIX: Check for SUCCESS in output
             Write-Log "Scheduled task '${TaskName}' registered successfully using schtasks.exe."
             return $true
         } else {
@@ -387,14 +390,12 @@ function Register-MiholessScheduledTask {
 # Task: Mihomo Core Updater
 $taskNameCore = "Miholess_Core_Updater"
 $scriptCorePath = "${global:MiholessInstallDirJson}/miholess_core_updater.ps1"
-# No New-ScheduledTaskTrigger call here
 Register-MiholessScheduledTask -TaskName $taskNameCore -Description "Updates Mihomo core to the latest non-Go version." `
     -ScriptPath $scriptCorePath -ScheduleType "DAILY" -ScheduleTime "03:00"
 
 # Task: Mihomo Config Updater
 $taskNameConfig = "Miholess_Config_Updater"
 $scriptConfigPath = "${global:MiholessInstallDirJson}/miholess_config_updater.ps1"
-# No New-ScheduledTaskTrigger call here
 Register-MiholessScheduledTask -TaskName $taskNameConfig -Description "Updates Mihomo remote and local configurations." `
     -ScriptPath $scriptConfigPath -ScheduleType "HOURLY" -ScheduleTime "00:00" # Runs hourly starting at midnight
 

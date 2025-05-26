@@ -74,31 +74,27 @@ $taskNames = @(
 foreach ($taskName in $taskNames) {
     Write-Log "Attempting to unregister scheduled task '${taskName}' using schtasks.exe..."
     try {
-        # FIX: Correctly check if task exists by parsing schtasks.exe /query output
+        # FIX: Correctly check if task exists by parsing schtasks.exe /query output for "TaskName:"
         $taskQueryArgs = @("/query", "/TN", "`"${taskName}`"", "/FO", "LIST")
         $taskQueryResult = (& schtasks.exe $taskQueryArgs 2>&1)
         
-        # Check if the query returned a task name or if it explicitly says not found
-        # (Chinese for "ERROR: The system cannot find the task specified.")
-        $taskExists = ($taskQueryResult -join "`n" -match "TaskName:") # Look for "TaskName:" indicating task exists
-        $taskNotFoundError = ($taskQueryResult -join "`n" -match "错误: 指定的服务不存在。" -or $taskQueryResult -join "`n" -match "ERROR: The system cannot find the task specified.")
+        # Check if the query returned "TaskName:" indicating task exists.
+        # This is more reliable than checking LASTEXITCODE or error messages for different locales.
+        $taskExists = ($taskQueryResult -join "`n" -match "TaskName:")
 
-        if ($taskExists -and -not $taskNotFoundError) { # Task exists
+        if ($taskExists) { # Task exists
             Write-Log "Scheduled task '${taskName}' found. Deleting..." "WARN"
             # Use proper argument array for schtasks.exe /delete
             $deleteArgs = @("/delete", "/TN", "`"${taskName}`"", "/F")
             $result = (& schtasks.exe $deleteArgs 2>&1)
             
-            if ($LASTEXITCODE -eq 0 -and $result -match "SUCCESS") {
+            if ($LASTEXITCODE -eq 0 -and ($result -join "`n" -match "SUCCESS")) { # FIX: Check for "SUCCESS" in output
                 Write-Log "Scheduled task '${taskName}' unregistered successfully using schtasks.exe."
             } else {
                 throw "schtasks.exe /delete command failed: $result"
             }
-        } elseif ($taskNotFoundError) {
-            Write-Log "Scheduled task '${taskName}' not found. Skipping unregistration." "INFO"
         } else {
-            Write-Log "Failed to query task '${taskName}' or unexpected output. Skipping unregistration." "WARN"
-            Write-Log "Query output: ($($taskQueryResult -join ' '))" "DEBUG"
+            Write-Log "Scheduled task '${taskName}' not found. Skipping unregistration." "INFO"
         }
     } catch {
         $errorMessage = $_.Exception.Message
