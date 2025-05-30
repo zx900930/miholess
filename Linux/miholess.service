@@ -1,0 +1,16 @@
+[Unit]
+Description=Miholess Core Service
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+# Will be replaced by install.sh:
+ExecStart=/opt/miholess/mihomo -f /etc/mihomo/config.yaml -d /etc/mihomo
+WorkingDirectory=/opt/miholess
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=500000
+
+[Install]
+WantedBy=multi-user.target

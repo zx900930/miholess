@@ -20,7 +20,7 @@
 - **Automated Configuration Updates:** Downloads a remote configuration file and saves it as `config.yaml` within a specified local folder, which Mihomo then uses.
 - **Cross-Platform Automation:**
   - **Windows:** Utilizes PowerShell, [NSSM (Non-Sucking Service Manager)](https://nssm.cc/) for robust Windows Services, and `schtasks.exe` for periodic updates.
-  - **Linux:** (Planned) Will use Bash scripts, systemd services, and cron jobs/systemd timers for equivalent functionality.
+  - **Linux:** Uses Bash scripts, systemd for service management and timers for periodic updates.
 - **Customizable Sources:** Allows users to specify custom mirror URLs for Mihomo binaries and data files, as well as a custom remote configuration URL.
 - **Flexible Configuration Management:** Use a single remote URL for your main configuration, or manage your `config.yaml` entirely locally.
 
@@ -41,12 +41,12 @@ miholess/
 │   └── nssm/                   # Directory containing bundled NSSM executable
 │       └── nssm.exe
 ├── Linux/
-│   ├── install.sh              # (Planned) Main installation script
-│   ├── uninstall.sh            # (Planned) Uninstallation script
-│   ├── miholess_core_updater.sh   # (Planned) Script to update Mihomo core
-│   ├── miholess_config_updater.sh # (Planned) Script to update remote configurations
-│   ├── miholess.service        # (Planned) systemd service unit file
-│   └── miholess.sh             # (Planned) Main Mihomo execution script
+│   ├── install.sh              # Main installation script
+│   ├── uninstall.sh            # Uninstallation script
+│   ├── miholess_core_updater.sh   # Script to update Mihomo core
+│   ├── miholess_config_updater.sh # Script to update remote configurations
+│   ├── miholess.service        # systemd service unit file
+│   └── helper_functions.sh     # Common Bash functions
 ```
 
 ## Installation
@@ -58,6 +58,11 @@ miholess/
   - PowerShell 5.1 or newer (PowerShell 7+ is recommended for best compatibility and features).
   - **Administrator privileges** are required for installation and uninstallation.
   - An active internet connection to download Mihomo and related files.
+- **Linux:**
+  - A systemd-based Linux distribution (e.g., Ubuntu, Debian, Fedora, CentOS 7+).
+  - `bash`, `curl`, `jq`, `tar`, `gzip`, `unzip` utilities. The installer will attempt to install missing dependencies.
+  - **Root privileges** (or `sudo`) are required for installation and uninstallation.
+  - An active internet connection.
 
 ### Windows Installation
 
@@ -105,9 +110,70 @@ After installation, `miholess` will:
     - `Miholess_Core_Updater`: Runs daily at 3:00 AM to check for and update the Mihomo core.
     - `Miholess_Config_Updater`: Runs hourly to check for and update the remote configuration.
 
-### Linux Installation (Planned)
+### Linux Installation
 
-_(This section will be filled once the Linux scripts are developed)_
+The `install.sh` script is an interactive installer that guides you through the setup.
+
+**Recommended (One-liner for fresh install):**
+
+Open a **terminal as root** (or use `sudo -i` then paste the command) and run:
+
+```bash
+curl -sL https://raw.githubusercontent.com/zx900930/miholess/main/Linux/install.sh | bash
+```
+
+**Explanation of the one-liner:**
+
+- `curl -sL ...`: Downloads the `install.sh` script content silently (`-s`) and follows redirects (`-L`).
+- `| bash`: Pipes the downloaded script content directly to `bash` for execution.
+
+**Interactive Setup Steps:**
+
+Once the script starts, it will prompt you for the following information. Default values are provided in parentheses; press Enter to accept the default or type a new value.
+
+- **Installation Directory:** Where Miholess and Mihomo files will be stored (e.g., `/opt/miholess`).
+- **Mihomo Core Download Mirror URL:** Base URL for Mihomo binary downloads. Use this for GitHub mirrors.
+- **GeoIP.dat download URL**
+- **GeoSite.dat download URL**
+- **Country.mmdb download URL**
+- **Remote configuration URL:** The URL of your main Mihomo configuration file. Leave empty if you manage `config.yaml` locally.
+- **Local configuration folder path:** A folder where Mihomo's `config.yaml` (and potentially other data files) will reside (e.g., `/etc/mihomo`).
+- **Mihomo listen port:** The port Mihomo will listen on (default: `7890`).
+- **Force re-installation:** Choose Y/N if you want to overwrite an existing Miholess installation.
+
+After you provide all details, a summary will be displayed, and you'll be asked to press Enter to confirm and proceed.
+
+After installation, `miholess` will:
+
+1.  Check for and attempt to install required dependencies (`curl`, `jq`, `tar`, `gzip`, `unzip`).
+2.  Create necessary directories.
+3.  Create a `config.json` file in the installation directory based on your input.
+4.  Download the latest Mihomo core and required data files.
+5.  Copy helper scripts to the installation directory.
+6.  Set up a `systemd` service (`miholess.service`) to run `mihomo` directly, ensuring it starts automatically on boot and restarts if it crashes.
+7.  Create `systemd` timers:
+    - `miholess-core-updater.timer`: Runs `miholess_core_updater.sh` daily to update the Mihomo core.
+    - `miholess-config-updater.timer`: Runs `miholess_config_updater.sh` hourly to update the configuration and geodata.
+
+### Linux Uninstallation
+
+To uninstall `miholess`, open a **terminal as root** (or use `sudo`) and run:
+
+```bash
+curl -sL https://raw.githubusercontent.com/zx900930/miholess/main/Linux/uninstall.sh | bash
+```
+
+This script will stop and disable systemd services and timers, remove their unit files, and delete the Miholess installation directory.
+
+### Linux Usage and Troubleshooting
+
+- **Service Status:** `systemctl status miholess.service`
+- **Start/Stop Service:** `sudo systemctl start miholess.service` / `sudo systemctl stop miholess.service`
+- **Timer Status:** `systemctl list-timers miholess-*`
+- **Mihomo Logs:** Check the file path specified in `config.json` (default: `/opt/miholess/mihomo.log`).
+- **Miholess Script Logs:** Check `/opt/miholess/miholess_service.log` for logs from the Miholess update scripts.
+- **Firewall:** Ensure Mihomo's listen port (default 7890) is allowed through your system's firewall (e.g., `ufw allow 7890/tcp` if using UFW).
+- **Permissions:** Ensure Mihomo can read/write to its configured directories (`/etc/mihomo` or your chosen local config path). If running as a non-root user, adjust permissions accordingly.
 
 ## Configuration
 
